@@ -1,82 +1,14 @@
 from concurrent.futures import ThreadPoolExecutor
-from dataclasses import dataclass, replace
-from datetime import UTC, date, datetime, timedelta
+from dataclasses import replace
+from datetime import timedelta
 
 import pytest
+from helpers import BANK_A, BANK_B, T0, message
 
 from echtzeit.errors import InvalidRequest, MessageError
 from echtzeit.iso20022 import pacs002, pacs008
 from echtzeit.iso20022.identifiers import make_german_iban, new_uetr
 from echtzeit.models import SYSTEM
-from echtzeit.payments import InstantPaymentProcessor
-
-T0 = datetime(2026, 11, 25, 10, 0, 0, 0, tzinfo=UTC)
-BANK_A = "ECHTDEFF"
-BANK_B = "ECHTDEF1"
-
-
-class Clock:
-    def __init__(self, now: datetime = T0):
-        self.now = now
-
-    def __call__(self) -> datetime:
-        return self.now
-
-
-@dataclass(frozen=True)
-class Customer:
-    id: str
-    name: str
-    iban: str
-    bic: str
-
-
-@pytest.fixture
-def clock():
-    return Clock()
-
-
-@pytest.fixture
-def processor(ledger, clock):
-    return InstantPaymentProcessor(ledger, clock=clock)
-
-
-@pytest.fixture
-def customer(ledger, bank):
-    counter = iter(range(1, 1000))
-
-    def _make(name: str, bic: str = BANK_A, funds: int = 0) -> Customer:
-        iban = make_german_iban(str(next(counter)))
-        account_id = ledger.create_account(name, iban=iban, bic=bic)
-        if funds:
-            ledger.transfer(
-                idempotency_key=f"fund-{account_id}",
-                debtor_id=bank,
-                creditor_id=account_id,
-                amount_cents=funds,
-            )
-        return Customer(account_id, name, iban, bic)
-
-    return _make
-
-
-def message(debtor: Customer, creditor: Customer, **overrides) -> pacs008.CreditTransfer:
-    fields = {
-        "msg_id": "MSG-1",
-        "created_at": T0,
-        "end_to_end_id": "E2E-1",
-        "tx_id": "TX-1",
-        "uetr": new_uetr(),
-        "amount_cents": 1_000,
-        "settlement_date": date(2026, 11, 25),
-        "accepted_at": T0,
-        "debtor": pacs008.Party(debtor.name, debtor.iban, debtor.bic),
-        "creditor": pacs008.Party(creditor.name, creditor.iban, creditor.bic),
-        "remittance": "Invoice 42",
-    }
-    fields.update(overrides)
-    return pacs008.CreditTransfer(**fields)
-
 
 # -- accepted payments --------------------------------------------------------
 

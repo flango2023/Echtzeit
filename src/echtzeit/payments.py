@@ -22,8 +22,11 @@ not specified, agent generated). That mapping is a modelling choice of this proj
 The idempotency key is "<debtor BIC>:<TxId>", because the guidelines make TxId unique per
 originator PSP, not globally.
 
+Every rejection is written to the audit log before the reply is returned.
+
 A message that cannot be parsed has no identifiers to answer, so `process` raises
-MessageError and produces no pacs.002.
+MessageError and produces no pacs.002. Such a message is not written to the audit log
+either, because there is nothing reliable to store.
 """
 
 import hashlib
@@ -31,6 +34,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 
+from echtzeit.audit import AuditLog
 from echtzeit.errors import IdempotencyConflict, InsufficientFunds
 from echtzeit.iso20022 import pacs002, pacs008
 from echtzeit.ledger import Ledger, TransferResult
@@ -67,10 +71,12 @@ class InstantPaymentProcessor:
         self,
         ledger: Ledger,
         *,
+        audit: AuditLog,
         clock: Callable[[], datetime] = lambda: datetime.now(UTC),
         timeout: timedelta = EXECUTION_TIMEOUT,
     ):
         self._ledger = ledger
+        self._audit = audit
         self._clock = clock
         self._timeout = timeout
 
@@ -133,6 +139,9 @@ class InstantPaymentProcessor:
         self, message: pacs008.CreditTransfer, key: str, now: datetime, reason_code: str
     ) -> ProcessingResult:
         report = self._report(message, key, now, reason_code=reason_code)
+        # Fail closed: if the audit write fails, the exception propagates and no reply is sent.
+        # No money has moved at this point, so the originator can safely retry.
+        self._audit.record_rejection(message, report, now)
         return ProcessingResult(report, pacs002.build(report), None)
 
     @staticmethod

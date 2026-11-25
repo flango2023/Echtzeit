@@ -83,8 +83,34 @@ class LedgerEntry(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow)
 
 
+class RejectedPayment(Base):
+    """Audit record of a payment message that was refused. One row per attempt.
+
+    Rejected payments move no money, so they never reach the ledger. This table keeps them,
+    because repeated refusals (probing unknown accounts, repeated insufficient-funds attempts)
+    are signals for fraud detection and evidence for audits. The IBANs are the ones written in
+    the message, even when no account matches them.
+    """
+
+    __tablename__ = "rejected_payments"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    recorded_at: Mapped[datetime] = mapped_column(DateTime)
+    msg_id: Mapped[str] = mapped_column(String(35))
+    tx_id: Mapped[str] = mapped_column(String(35), index=True)
+    uetr: Mapped[str] = mapped_column(String(36), index=True)
+    end_to_end_id: Mapped[str] = mapped_column(String(35))
+    debtor_bic: Mapped[str] = mapped_column(String(11))
+    debtor_iban: Mapped[str] = mapped_column(String(34), index=True)
+    creditor_bic: Mapped[str] = mapped_column(String(11))
+    creditor_iban: Mapped[str] = mapped_column(String(34), index=True)
+    amount_cents: Mapped[int] = mapped_column(Integer)
+    reason_code: Mapped[str] = mapped_column(String(4), index=True)
+    reply_msg_id: Mapped[str] = mapped_column(String(35))
+
+
 # Append-only enforcement. Corrections must be new transfers, never edits.
-for _table in ("ledger_entries", "transfers"):
+for _table in ("ledger_entries", "transfers", "rejected_payments"):
     for _op in ("UPDATE", "DELETE"):
         _ddl = DDL(
             f"CREATE TRIGGER IF NOT EXISTS {_table}_no_{_op.lower()} "

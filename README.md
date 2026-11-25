@@ -27,6 +27,13 @@ Implemented:
   retry arrives after the 10-second limit, so a completed payment is never reported as
   timed out. The idempotency key is the originator BIC plus the `TxId`.
 
+- Audit log of rejections (`echtzeit.audit`): every refused payment message is written to an
+  append-only table (database triggers block updates and deletes) before the reply is sent.
+  One row per attempt, with the IBANs as written in the message, so probing of unknown
+  accounts stays visible. Accepted payments are recorded by the ledger itself. If the audit
+  write fails, no reply is sent. No money has moved at that point, so the originator can
+  retry.
+
 Processing limits:
 
 - The `MS03` answer for insufficient funds is this project's choice. The EPC lists no
@@ -34,10 +41,12 @@ Processing limits:
   creates a `pacs.008`.
 - The creditor name in the message is not compared with the account holder name. That
   check (Verification of Payee) is planned together with the scam scenarios.
-- Rejected payments are not stored, so there is no audit log of rejections yet.
 - The 10-second limit is measured from the message's acceptance time against the processor's
   clock. There is no model of network delay or clock skew.
-- The database schema changed (IBAN, BIC, UETR columns). There are no migrations, so a
+- The audit log has no retention period, access control or tamper-evident chaining. A
+  database administrator can drop the triggers. Rows hold IBANs and amounts, which would be
+  personal data in a real deployment.
+- The database schema changed (IBAN, BIC, UETR columns, audit table). There are no migrations, so a
   database file created by an earlier version must be deleted.
 
 ISO 20022 coverage and limits:
