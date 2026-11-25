@@ -15,12 +15,20 @@ import statistics
 from dataclasses import fields
 from pathlib import Path
 
+from echtzeit.liability import ECB_GBP_PER_EUR, ECB_RATE_DATE, REGIMES, Assumptions, totals
 from echtzeit.risk import RiskConfig
 from echtzeit.simulation import Policy, ScenarioConfig, SimulationResult, simulate
 
 
 def euro(cents: int) -> str:
     return f"€{cents / 100:,.2f}"
+
+
+def duration(delta) -> str:
+    if delta is None:
+        return "–"
+    minutes = int(delta.total_seconds() // 60)
+    return f"{minutes} min" if minutes < 60 else f"{minutes // 60} h"
 
 
 def _ms(value: float | None) -> str:
@@ -49,6 +57,21 @@ def render_spread(runs: dict[int, list[SimulationResult]]) -> list[str]:
         ),
         ("Normal payments warned or blocked", lambda r: r.legit.flagged_share, "{:.1%}"),
     ]
+    for regime in REGIMES:
+
+        def victims(r, regime=regime):
+            return totals(r.cases, regime, Assumptions()).victim_cents / max(
+                1, r.total("attempted_cents")
+            )
+
+        def banks(r, regime=regime):
+            return totals(r.cases, regime, Assumptions()).psp_cents / max(
+                1, r.total("attempted_cents")
+            )
+
+        metrics.append((f"Victims bear under {regime.code}, share of attempted", victims, "{:.1%}"))
+        if regime.receiving_share or regime.covered_victims:
+            metrics.append((f"Banks bear under {regime.code}, share of attempted", banks, "{:.1%}"))
     lines = [
         f"## Spread over seeds {seeds[0]}–{seeds[-1]}",
         "",
@@ -145,12 +168,13 @@ def render(
             decision = "not scored" if c.decision is None else f"{c.decision} ({c.points})"
             lines.append(
                 f"| {c.case_id} | {c.kind} | {decision} | {', '.join(c.reasons) or '–'} | {c.vop or '–'} "
-                f"| {'yes' if c.executed else 'no'} | {c.report_delay or '–'} "
+                f"| {'yes' if c.executed else 'no'} | {duration(c.report_delay)} "
                 f"| {euro(c.remaining_lower_cents)}–{euro(c.remaining_upper_cents)} "
                 f"| {euro(c.recovered_cents)} | {euro(c.lost_cents)} |"
             )
         lines.append("")
 
+    lines += render_liability(results)
     lines += ["## Assumptions (ScenarioConfig)", "", "| Setting | Value |", "|---|---|"]
     for item in fields(config):
         lines.append(f"| `{item.name}` | {getattr(config, item.name)} |")
@@ -159,6 +183,61 @@ def render(
         lines.append(f"| `{item.name}` | {getattr(risk, item.name)} |")
     lines.append("")
     return "\n".join(lines)
+
+
+def render_liability(results: list[SimulationResult]) -> list[str]:
+    assumptions = Assumptions()
+    lines = [
+        "## Who pays",
+        "",
+        "The loss of each paid scam (amount paid minus money recovered) is shared between the",
+        "victim, the victim's bank (sending PSP) and the bank of the first mule (receiving PSP)",
+        "under each regime. Regime rules and their sources are in `echtzeit/liability.py` and",
+        "[docs/design/liability.md](../design/liability.md).",
+        "",
+        "- `UK_PSR` is applied as a what-if: the real scheme covers sterling Faster Payments and",
+        (
+            f"  CHAPS. Cap and excess are converted at the ECB rate of {ECB_RATE_DATE} "
+            f"(£{ECB_GBP_PER_EUR} per €1)."
+        ),
+        "- `EU_PSR_PROVISIONAL` follows a provisional agreement that is not in force. The final",
+        "  text may differ.",
+        "- Invoice scams hit businesses. Whether a business counts as a microenterprise is an",
+        "  assumption (`microenterprise_share`).",
+        "",
+        "| Policy | Regime | Paid scams | Covered | Loss | Victims | Sending banks | Receiving banks |",
+        "|---|---|---|---|---|---|---|---|",
+    ]
+    for result in results:
+        for regime in REGIMES:
+            t = totals(result.cases, regime, assumptions)
+            lines.append(
+                f"| {result.policy.value} | {regime.code} | {t.cases} | {t.covered} | {euro(t.loss_cents)} "
+                f"| {euro(t.victim_cents)} | {euro(t.sending_psp_cents)} | {euro(t.receiving_psp_cents)} |"
+            )
+    strict = Assumptions(ignored_warning_is_gross_negligence=True)
+    lines += [
+        "",
+        "Sensitivity: if ignoring a bank warning were treated as gross negligence (the UK rules",
+        "set a high bar for gross negligence, so this is a test, not a reading of the rules):",
+        "",
+        "| Policy | Regime | Covered | Victims | Banks |",
+        "|---|---|---|---|---|",
+    ]
+    for result in results:
+        if result.policy.value == "NONE":
+            continue  # nobody is warned when nothing is scored
+        for regime in REGIMES[:2]:
+            t = totals(result.cases, regime, strict)
+            lines.append(
+                f"| {result.policy.value} | {regime.code} | {t.covered} | {euro(t.victim_cents)} | {euro(t.psp_cents)} |"
+            )
+    lines += [
+        "",
+        "Settings used: " + ", ".join(f"`{k}={v}`" for k, v in vars(assumptions).items()) + ".",
+        "",
+    ]
+    return lines
 
 
 def main() -> None:

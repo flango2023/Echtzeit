@@ -14,15 +14,17 @@ The same population and schedule run under three policies:
   This models the receiving-PSP freeze in the provisional EU Payment Services Regulation.
 
 Scenario patterns, paraphrased from the EPC 2025 Payments Threats and Fraud Trends Report
-(EPC162-24, sections 3.1.4 and 3.1.7):
+(EPC162-24, version 2.0, 19 November 2025):
 
-* Safe account: a fraudster posing as the bank convinces the customer that the account is at
-  risk and that the money must be moved to a "safe" account the fraudster controls.
-* Invoice with a changed IBAN: the invoicing stage is exposed to IBAN manipulation. The invoice
-  keeps the real supplier's name but carries the IBAN of an account the fraudster controls.
-* Money mules: mule accounts receive the money and pass it on so that it cannot be tracked,
-  often ending in a cash withdrawal. The report notes that most cases involve one or two levels
-  of mules, which is the range used here.
+* Safe account (section 2, page 17): a fraudster posing as the bank convinces the customer
+  that the account is at risk and that the money must be moved to a "safe" account the
+  fraudster controls.
+* Invoice with a changed IBAN (executive summary, page 7: the invoicing stage is exposed to
+  IBAN manipulation). The invoice keeps the real supplier's name but carries the IBAN of an
+  account the fraudster controls.
+* Money mules (section 3.1.7.1, page 44): mule accounts receive the money and pass it on so that
+  it cannot be tracked, often ending in a cash withdrawal. The report notes that most cases
+  involve no more than one or two levels of mules, which is the range used here.
 
 Every number in ScenarioConfig (behaviour probabilities, delays, amounts) is an assumption of
 this project, not a measured value. The scenarios and the risk rules were written by the same
@@ -91,6 +93,9 @@ class ScenarioConfig:
     landlords: int = 5
     safe_account_cases: int = 12
     invoice_cases: int = 12
+    # Share of the simulated businesses that are microenterprises (fewer than 10 staff and at
+    # most EUR 2 million turnover). Decides whether UK reimbursement covers an invoice scam.
+    microenterprise_share: float = 0.5
     # Behaviour when the bank shows a warning.
     customer_ignores_warning: float = 0.9
     victim_ignores_warning: float = 0.6
@@ -121,6 +126,7 @@ class CaseOutcome:
     case_id: str
     kind: str  # SAFE_ACCOUNT or INVOICE_IBAN_CHANGE
     victim_id: str
+    victim_type: str  # CONSUMER, MICROENTERPRISE or OTHER_BUSINESS (see echtzeit.liability)
     attempted_cents: int
     decision: str | None  # None when the policy does not score
     points: int | None
@@ -340,7 +346,9 @@ class _Run:
 
     # -- normal traffic ----------------------------------------------------------------------
 
-    def legit_payment(self, debtor: _Party, creditor: _Party, cents: int, day: int, n: int) -> None:
+    def legit_payment(
+        self, debtor: _Party, creditor: _Party, cents: int, day: int, n: int
+    ) -> Callable[[], None]:
         typed = creditor.name
         roll = self.rng.random()
         if roll < self.cfg.p_typo:
@@ -522,7 +530,10 @@ class _Run:
             else:
                 typed = "Sicherheitskonto Kundenservice"
             self.at(
-                moment, self.scam_payment(case_id, "SAFE_ACCOUNT", victim, mule, typed, share=share)
+                moment,
+                self.scam_payment(
+                    case_id, "SAFE_ACCOUNT", "CONSUMER", victim, mule, typed, share=share
+                ),
             )
 
         for i in range(cfg.invoice_cases):
@@ -534,10 +545,18 @@ class _Run:
             )
             mule = self.new_mule(case_id, 1)
             cents = rng.randint(80_000, 600_000)
+            micro = _draw(cfg.seed, "microenterprise", business.name) < cfg.microenterprise_share
+            victim_type = "MICROENTERPRISE" if micro else "OTHER_BUSINESS"
             self.at(
                 moment,
                 self.scam_payment(
-                    case_id, "INVOICE_IBAN_CHANGE", business, mule, supplier.name, cents=cents
+                    case_id,
+                    "INVOICE_IBAN_CHANGE",
+                    victim_type,
+                    business,
+                    mule,
+                    supplier.name,
+                    cents=cents,
                 ),
             )
 
@@ -545,13 +564,14 @@ class _Run:
         self,
         case_id: str,
         kind: str,
+        victim_type: str,
         victim: _Party,
         mule: _Party,
         typed: str,
         *,
         share: float | None = None,
         cents: int | None = None,
-    ):
+    ) -> Callable[[], None]:
         def run() -> None:
             amount = cents
             if amount is None:
@@ -563,6 +583,7 @@ class _Run:
                 case_id=case_id,
                 kind=kind,
                 victim_id=victim.id,
+                victim_type=victim_type,
                 attempted_cents=amount,
                 decision=assessment.decision.value if assessment else None,
                 points=assessment.points if assessment else None,
@@ -613,7 +634,7 @@ class _Run:
             )
             self.at(self.now + later, self.cash_out(mule, amount))
 
-    def cash_out(self, mule: _Party, cents: int):
+    def cash_out(self, mule: _Party, cents: int) -> Callable[[], None]:
         def run() -> None:
             amount = min(cents, self.ledger.available_balance(mule.id))
             if amount <= 0:
@@ -631,7 +652,7 @@ class _Run:
 
         return run
 
-    def report(self, case: CaseOutcome):
+    def report(self, case: CaseOutcome) -> Callable[[], None]:
         def run() -> None:
             upper = trace_payment(self.ledger, case.uetr, attribution=Attribution.OWN_FUNDS_FIRST)
             lower = trace_payment(

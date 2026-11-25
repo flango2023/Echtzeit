@@ -124,3 +124,25 @@ def test_the_receiving_side_freeze_changes_the_outcome(results):
     assert both.receiver_freezes > 0
     assert both.total("recovered_cents") > sender.total("recovered_cents")
     assert both.total("lost_cents") < sender.total("lost_cents")
+
+
+def test_who_pays_shares_exactly_the_simulated_losses(results):
+    from echtzeit.liability import REGIMES, Assumptions, totals
+    from echtzeit.scenario_report import render
+
+    for result in results.values():
+        lost = result.total("lost_cents")
+        for regime in REGIMES:
+            t = totals(result.cases, regime, Assumptions())
+            assert t.loss_cents == lost
+            assert t.victim_cents + t.sending_psp_cents + t.receiving_psp_cents == lost
+    text = render([results[policy] for policy in Policy])
+    assert "## Who pays" in text and "| NONE | UK_PSR |" in text
+
+
+def test_victim_types_follow_the_scenario(results):
+    for case in results[Policy.NONE].cases:
+        if case.kind == "SAFE_ACCOUNT":
+            assert case.victim_type == "CONSUMER"
+        else:
+            assert case.victim_type in {"MICROENTERPRISE", "OTHER_BUSINESS"}

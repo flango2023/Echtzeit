@@ -13,7 +13,7 @@ scenarios therefore measure the rules against assumptions, not real fraud.
 """
 
 import time
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from datetime import datetime, timedelta
 from enum import Enum
 
@@ -80,7 +80,6 @@ class _Features:
     available_cents: int = 0
     receiver_credit_count: int = 0
     recent_customer_credits_cents: int = 0
-    reasons: list[Reason] = field(default_factory=list)
 
 
 class RiskScorer:
