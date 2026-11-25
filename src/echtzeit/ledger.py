@@ -12,20 +12,24 @@ Rules enforced here:
 """
 
 import hashlib
+from collections.abc import Iterator
+from contextlib import contextmanager
 from dataclasses import dataclass, field
 
 from sqlalchemy import func, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, sessionmaker
 
+from echtzeit import holds
 from echtzeit.errors import (
     AccountNotFound,
     IdempotencyConflict,
     InsufficientFunds,
     InvalidRequest,
 )
+from echtzeit.holds import HoldInfo
 from echtzeit.iso20022.identifiers import bic_is_valid, iban_is_valid
-from echtzeit.models import CUSTOMER, SYSTEM, Account, LedgerEntry, Transfer
+from echtzeit.models import CUSTOMER, SYSTEM, Account, Hold, HoldRelease, LedgerEntry, Transfer
 
 
 @dataclass(frozen=True)
@@ -55,6 +59,12 @@ class AccountInfo:
     iban: str | None
     bic: str | None
     balance_cents: int
+    held_cents: int
+
+    @property
+    def available_cents(self) -> int:
+        """Money a payment can spend: the balance minus active holds."""
+        return self.balance_cents - self.held_cents
 
 
 def _request_hash(
@@ -124,7 +134,64 @@ class Ledger:
                 iban=account.iban,
                 bic=account.bic,
                 balance_cents=account.balance_cents,
+                held_cents=account.held_cents,
             )
+
+    @contextmanager
+    def transaction(self) -> Iterator[Session]:
+        """One database transaction for callers that combine several steps (tracing, freezing).
+
+        Commits on success and rolls back on any exception.
+        """
+        with self._sessions.begin() as session:
+            yield session
+
+    def available_balance(self, account_id: str) -> int:
+        with self._sessions() as session, session.begin():
+            row = session.execute(
+                select(Account.balance_cents, Account.held_cents).where(Account.id == account_id)
+            ).one_or_none()
+            if row is None:
+                raise AccountNotFound(account_id)
+            return row[0] - row[1]
+
+    # -- holds -------------------------------------------------------------
+
+    def place_hold(
+        self,
+        account_id: str,
+        amount_cents: int,
+        *,
+        reason: str,
+        placed_by: str,
+        uetr: str | None = None,
+    ) -> HoldInfo:
+        with self._sessions.begin() as session:
+            return holds.place_hold(
+                session, account_id, amount_cents, reason=reason, placed_by=placed_by, uetr=uetr
+            )
+
+    def freeze_available(
+        self,
+        account_id: str,
+        up_to_cents: int,
+        *,
+        reason: str,
+        placed_by: str,
+        uetr: str | None = None,
+    ) -> HoldInfo | None:
+        with self._sessions.begin() as session:
+            return holds.freeze_available(
+                session, account_id, up_to_cents, reason=reason, placed_by=placed_by, uetr=uetr
+            )
+
+    def release_hold(self, hold_id: str, *, reason: str, released_by: str) -> None:
+        with self._sessions.begin() as session:
+            holds.release_hold(session, hold_id, reason=reason, released_by=released_by)
+
+    def active_holds(self, account_id: str) -> list[HoldInfo]:
+        with self._sessions() as session, session.begin():
+            return holds.active_holds(session, account_id)
 
     def balance(self, account_id: str) -> int:
         with self._sessions() as session, session.begin():
@@ -150,7 +217,7 @@ class Ledger:
         )
 
         with self._sessions.begin() as session:
-            existing = self._find_existing(session, idempotency_key, request_hash)
+            existing = self._find_existing(session, idempotency_key, request_hash, uetr)
             if existing is not None:
                 return self._result(existing, replayed=True)
 
@@ -195,13 +262,13 @@ class Ledger:
             debtor_id, creditor_id, amount_cents, reference, end_to_end_id, uetr
         )
         with self._sessions() as session, session.begin():
-            existing = self._find_existing(session, idempotency_key, request_hash)
+            existing = self._find_existing(session, idempotency_key, request_hash, uetr)
             return None if existing is None else self._result(existing, replayed=True)
 
     # -- internals ---------------------------------------------------------
 
     @staticmethod
-    def _find_existing(session: Session, idempotency_key: str, request_hash: str):
+    def _find_existing(session: Session, idempotency_key: str, request_hash: str, uetr: str | None):
         existing = session.scalar(
             select(Transfer).where(Transfer.idempotency_key == idempotency_key)
         )
@@ -209,6 +276,13 @@ class Ledger:
             raise IdempotencyConflict(
                 f"idempotency key {idempotency_key!r} was used with a different request"
             )
+        # A UETR identifies one payment. A second transfer under another key is a duplicate.
+        if (
+            existing is None
+            and uetr is not None
+            and session.scalar(select(Transfer.id).where(Transfer.uetr == uetr)) is not None
+        ):
+            raise IdempotencyConflict(f"uetr {uetr!r} already belongs to another transfer")
         return existing
 
     @staticmethod
@@ -243,8 +317,10 @@ class Ledger:
             statement = update(Account).where(Account.id == account_id)
             if delta < 0:
                 # The check lives in the UPDATE itself, so it is atomic with the change.
+                # Held money cannot be spent, so the test uses balance minus holds.
                 statement = statement.where(
-                    (Account.kind == SYSTEM) | (Account.balance_cents >= -delta)
+                    (Account.kind == SYSTEM)
+                    | (Account.balance_cents - Account.held_cents >= -delta)
                 )
             result = session.execute(
                 statement.values(balance_cents=Account.balance_cents + delta),
@@ -309,6 +385,8 @@ class Ledger:
                 if account.kind == CUSTOMER and account.balance_cents < 0:
                     report.problems.append(f"account {account.id}: negative customer balance")
 
+            self._check_holds(session, report)
+
             per_transfer = session.execute(
                 select(
                     LedgerEntry.transfer_id,
@@ -328,3 +406,23 @@ class Ledger:
                     f"{transfer_count} transfers but {len(per_transfer)} have ledger entries"
                 )
         return report
+
+    @staticmethod
+    def _check_holds(session: Session, report: InvariantReport) -> None:
+        active_sums = dict(
+            session.execute(
+                select(Hold.account_id, func.sum(Hold.amount_cents))
+                .outerjoin(HoldRelease, HoldRelease.hold_id == Hold.id)
+                .where(HoldRelease.hold_id.is_(None))
+                .group_by(Hold.account_id)
+            ).all()
+        )
+        for account in session.scalars(select(Account)):
+            expected = active_sums.get(account.id, 0)
+            if account.held_cents != expected:
+                report.problems.append(
+                    f"account {account.id}: held {account.held_cents} differs from "
+                    f"active holds {expected}"
+                )
+            if account.held_cents > account.balance_cents and account.kind == CUSTOMER:
+                report.problems.append(f"account {account.id}: more held than the balance")

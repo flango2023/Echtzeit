@@ -39,6 +39,12 @@ class Account(Base):
         # Customer accounts can never go negative. System accounts (the source of
         # fictional money) can, because they hold the opposite side of every deposit.
         CheckConstraint("kind = 'SYSTEM' OR balance_cents >= 0", name="ck_account_no_overdraft"),
+        # Held money is a part of the balance. System accounts cannot be held.
+        CheckConstraint("held_cents >= 0", name="ck_account_held_nonnegative"),
+        CheckConstraint(
+            "kind = 'SYSTEM' OR held_cents <= balance_cents", name="ck_account_held_within_balance"
+        ),
+        CheckConstraint("kind <> 'SYSTEM' OR held_cents = 0", name="ck_account_system_not_held"),
     )
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_new_id)
@@ -49,6 +55,8 @@ class Account(Base):
     bic: Mapped[str | None] = mapped_column(String(11), nullable=True)
     # Cached balance. The ledger is the source of truth; verify_invariants checks both agree.
     balance_cents: Mapped[int] = mapped_column(Integer, default=0)
+    # Cached sum of active holds. Spendable money is balance_cents - held_cents.
+    held_cents: Mapped[int] = mapped_column(Integer, default=0)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow)
 
 
@@ -68,7 +76,8 @@ class Transfer(Base):
     reference: Mapped[str | None] = mapped_column(String(140), nullable=True)
     # Identifiers from the payment message, kept so a payment can be traced end to end.
     end_to_end_id: Mapped[str | None] = mapped_column(String(35), nullable=True)
-    uetr: Mapped[str | None] = mapped_column(String(36), nullable=True, index=True)
+    # A UETR identifies one payment, so it is unique. Transfers made without a message have none.
+    uetr: Mapped[str | None] = mapped_column(String(36), nullable=True, unique=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow)
 
 
@@ -81,6 +90,40 @@ class LedgerEntry(Base):
     account_id: Mapped[str] = mapped_column(ForeignKey("accounts.id"), index=True)
     amount_cents: Mapped[int] = mapped_column(Integer)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow)
+
+
+class Hold(Base):
+    """Money stopped on an account. Immutable. It is active until a HoldRelease row exists."""
+
+    __tablename__ = "holds"
+    __table_args__ = (
+        CheckConstraint("amount_cents > 0", name="ck_hold_positive"),
+        CheckConstraint("amount_cents <= requested_cents", name="ck_hold_within_request"),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_new_id)
+    account_id: Mapped[str] = mapped_column(ForeignKey("accounts.id"), index=True)
+    requested_cents: Mapped[int] = mapped_column(Integer)
+    amount_cents: Mapped[int] = mapped_column(Integer)
+    reason: Mapped[str] = mapped_column(String(200))
+    placed_by: Mapped[str] = mapped_column(String(100))
+    # UETR of the payment that triggered the hold, so a trace can tell its own holds apart.
+    uetr: Mapped[str | None] = mapped_column(String(36), nullable=True, index=True)
+    # Highest ledger entry id when the hold was placed. Entries up to this id came before it.
+    placed_after_entry_id: Mapped[int] = mapped_column(Integer)
+    placed_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow)
+
+
+class HoldRelease(Base):
+    """Ends a hold. At most one per hold, enforced by the primary key."""
+
+    __tablename__ = "hold_releases"
+
+    hold_id: Mapped[str] = mapped_column(ForeignKey("holds.id"), primary_key=True)
+    reason: Mapped[str] = mapped_column(String(200))
+    released_by: Mapped[str] = mapped_column(String(100))
+    released_after_entry_id: Mapped[int] = mapped_column(Integer)
+    released_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow)
 
 
 class RejectedPayment(Base):
@@ -110,7 +153,7 @@ class RejectedPayment(Base):
 
 
 # Append-only enforcement. Corrections must be new transfers, never edits.
-for _table in ("ledger_entries", "transfers", "rejected_payments"):
+for _table in ("ledger_entries", "transfers", "rejected_payments", "holds", "hold_releases"):
     for _op in ("UPDATE", "DELETE"):
         _ddl = DDL(
             f"CREATE TRIGGER IF NOT EXISTS {_table}_no_{_op.lower()} "

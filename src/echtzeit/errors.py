@@ -27,3 +27,11 @@ class MessageError(EchtzeitError):
     def __init__(self, problems: list[str]):
         self.problems = list(problems)
         super().__init__("; ".join(self.problems))
+
+
+class TransferNotFound(EchtzeitError):
+    """No transfer carries the given UETR."""
+
+
+class TraceInconsistency(EchtzeitError):
+    """Replaying the ledger produced a debit the trace could not cover. This is a bug or tampering."""

@@ -25,7 +25,8 @@ Implemented:
   content `AM05`, message older than 10 seconds `AB05`, insufficient funds `MS03`.
   A repeated message is answered as accepted and moves money once. This holds even when the
   retry arrives after the 10-second limit, so a completed payment is never reported as
-  timed out. The idempotency key is the originator BIC plus the `TxId`.
+  timed out. The idempotency key is the originator BIC plus the `TxId`. A UETR identifies one
+  payment, so a message that reuses a UETR under another `TxId` is rejected as `AM05`.
 
 - Audit log of rejections (`echtzeit.audit`): every refused payment message is written to an
   append-only table (database triggers block updates and deletes) before the reply is sent.
@@ -46,8 +47,25 @@ Processing limits:
 - The audit log has no retention period, access control or tamper-evident chaining. A
   database administrator can drop the triggers. Rows hold IBANs and amounts, which would be
   personal data in a real deployment.
-- The database schema changed (IBAN, BIC, UETR columns, audit table). There are no migrations, so a
+- The database schema changed (IBAN, BIC, UETR columns, audit table, holds). There are no migrations, so a
   database file created by an earlier version must be deleted.
+
+- Holds (`Ledger.place_hold`, `freeze_available`, `release_hold`): money stopped on an account
+  without moving it. Payments can spend only the balance minus active holds. Holds and
+  releases are append-only rows. `freeze_available` records both the requested and the
+  secured amount.
+- Tracing (`echtzeit.tracing`): follows a payment through later transfers, account by
+  account, and reports how much is still on each account and how much moved on.
+  `freeze_traced_funds` traces and holds in one transaction. Mixed money is attributed by one
+  of two rules that give an upper and a lower bound. Design and limits:
+  [docs/design/holds-and-tracing.md](docs/design/holds-and-tracing.md).
+
+Holds and tracing limits:
+
+- The two attribution rules are bounds for an estimate, not legal tracing rules.
+- Who may place or release a hold is not enforced. `placed_by` is a free-text label.
+- Held money is only stopped. Returning it to the victim is not implemented.
+- The time a real freeze takes is not modelled yet. The scenarios will add it.
 
 ISO 20022 coverage and limits:
 
@@ -72,9 +90,11 @@ Limits:
   with PostgreSQL row locks.
 - Only completed transfers are stored. A rejected transfer leaves no record.
 
-Not implemented yet, in this order: holds and tracing of money across accounts, scam
-scenarios with fraud scoring, and a liability report that compares regimes (planned: UK,
-EU as provisional, and a no-refund baseline).
+Not implemented yet, in this order: scam scenarios with fraud scoring and a Verification of
+Payee check, then a liability report that compares regimes. Planned regimes for version 1:
+UK, EU (marked provisional, because the PSR text is a provisional agreement) and a no-refund
+baseline. Brazil's MED is planned for later, after its rules are read from the Banco Central
+texts.
 
 ## Run the tests
 
