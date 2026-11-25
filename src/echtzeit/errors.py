@@ -19,3 +19,11 @@ class InsufficientFunds(EchtzeitError):
 
 class IdempotencyConflict(EchtzeitError):
     """An idempotency key was reused with a different request payload."""
+
+
+class MessageError(EchtzeitError):
+    """An ISO 20022 message is malformed or breaks a rule. `problems` lists every finding."""
+
+    def __init__(self, problems: list[str]):
+        self.problems = list(problems)
+        super().__init__("; ".join(self.problems))
