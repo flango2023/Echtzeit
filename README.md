@@ -5,7 +5,8 @@ A scam-liability lab for instant payments. Work in progress, version 0.1.
 Echtzeit simulates SEPA Instant payments end to end. It covers a double-entry ledger,
 ISO 20022 messages, payee-name checks, a transparent risk score, money mules, tracing and
 freezing of stolen money. On top of that it shows who carries the loss under different
-reimbursement regimes. All money, people and banks are fictional. Nothing connects to a bank,
+reimbursement regimes. An authenticated HTTP API lets simulated banks use it, each limited
+to its own customers. All money, people and banks are fictional. Nothing connects to a bank,
 a payment scheme or real customer data.
 
 ## Results in short
@@ -16,10 +17,15 @@ code, and no number in it is typed by hand. Over the ten seeds (minimum / median
 
 | | No scoring | Sending bank scores | Plus receiving-side freeze |
 |---|---|---|---|
-| Scam money lost | 42.7% / 59.8% / 78.4% | 14.1% / 21.8% / 37.2% | 0.0% / 7.7% / 13.5% |
+| Scam money lost, recovery along the traced path | 42.7% / 59.8% / 78.4% | 14.1% / 21.8% / 37.2% | 0.0% / 7.7% / 13.5% |
 | Normal payments warned or blocked | 0% | 2.9% / 5.1% / 7.2% | 2.9% / 5.1% / 7.2% |
-| Victims' share under the UK rules | 2.2% / 15.7% / 23.8% | 0.4% / 4.9% / 13.0% | 0.0% / 0.4% / 3.7% |
-| Victims' share with no refund rule | 42.7% / 59.8% / 78.4% | 14.1% / 21.8% / 37.2% | 0.0% / 7.7% / 13.5% |
+| Victims' share under the UK rules | 2.4% / 18.2% / 27.0% | 0.4% / 5.4% / 13.0% | 0.0% / 0.9% / 3.7% |
+| Victims' share with no refund rule | 56.6% / 74.1% / 86.6% | 14.1% / 21.8% / 37.2% | 0.0% / 7.9% / 13.5% |
+| Victims' share under Brazil's MED | 42.7% / 59.8% / 78.4% | 14.1% / 21.8% / 37.2% | 0.0% / 7.7% / 13.5% |
+
+The UK rules move most of the loss to the banks. Brazil's MED makes no bank pay, but when
+nothing is scored its recovery along the traced path leaves victims with a smaller share than
+the no-refund baseline, which recovers only from the first receiving account.
 
 These numbers are not evidence about real fraud. The same author wrote the scenarios and the
 risk rules, so the results are circular by construction. Every probability, delay and amount
@@ -36,7 +42,8 @@ is an assumption, and the results file lists all of them.
 | `holds`, `tracing` | Holds stop money on an account. Tracing follows a payment through later transfers. Freezing holds what is still there. | [holds-and-tracing.md](docs/design/holds-and-tracing.md) |
 | `vop`, `risk` | Verification of Payee with the four EPC outcomes, and a rule-based risk score that lists every rule that fired. | [scenarios-and-scoring.md](docs/design/scenarios-and-scoring.md) |
 | `simulation`, `scenario_report` | A seeded synthetic population with normal payments and three scam patterns from the EPC fraud report. Three policies compared on the same world. | [scenarios-and-scoring.md](docs/design/scenarios-and-scoring.md) |
-| `liability` | Shares each loss between the victim, the sending bank and the receiving bank under the UK rules, the provisional EU rules and a no-refund baseline. | [liability.md](docs/design/liability.md) |
+| `liability` | Shares each loss between the victim, the sending bank and the receiving bank under the UK rules, the provisional EU rules, Brazil's MED and a no-refund baseline. | [liability.md](docs/design/liability.md) |
+| `api` | HTTP API with API keys, roles (bank, auditor, admin), per-bank authorization, rate limits and size limits. | [threat-model.md](docs/design/threat-model.md) |
 
 ### Ledger
 
@@ -64,6 +71,30 @@ Insufficient funds gives `MS03`.
 - Every rejection is written to the audit log before the reply. If that write fails, no reply
   is sent. No money has moved at that point, so the originator can retry.
 - XML input is parsed with `defusedxml`.
+
+### HTTP API
+
+Every endpoint except `GET /v1/health` needs `Authorization: Bearer <key>`.
+
+| Endpoint | Who may call it |
+|---|---|
+| `POST /v1/accounts`, `POST /v1/accounts/{iban}/deposits` | admin |
+| `GET /v1/accounts/{iban}` | the account's bank, auditor, admin |
+| `POST /v1/vop` | any bank |
+| `POST /v1/risk/assessments` | the debtor account's bank |
+| `POST /v1/payments` (body: `pacs.008` XML, reply: `pacs.002` XML) | the debtor agent's bank |
+| `GET /v1/payments/{uetr}/trace` | the payment's sending or receiving bank, auditor |
+| `POST /v1/payments/{uetr}/freeze` | any bank, holding only its own accounts |
+| `POST /v1/accounts/{iban}/holds`, `POST /v1/holds/{id}/release` | the account's bank |
+| `GET /v1/accounts/{iban}/holds` | the account's bank, auditor |
+| `GET /v1/audit/rejections` | auditor (all), banks (only rejections that involve them) |
+| `GET /v1/invariants` | auditor, admin |
+
+- A bank's request for another bank's account gets the same "not found" answer as an IBAN
+  that does not exist.
+- Traces show other banks' accounts only as BIC and amounts.
+- Who placed or released a hold is taken from the key, never from the request.
+- Errors use RFC 9457 problem details and never include internals or submitted values.
 
 ## Limits
 
@@ -115,10 +146,22 @@ Scenarios, scoring and liability:
   choice, because the EPC leaves matching to each PSP.
 - Cash withdrawals are not scored, because they are not instant credit transfers.
 - Assessment times come from one machine with SQLite and exclude network and messaging.
-- The UK regime is applied as a what-if to euro payments, at a fixed ECB exchange rate. The EU
-  regime follows a provisional agreement modelled from official summaries, because the legal
-  text could not be read here. Claim deadlines, vulnerability assessments and several other
-  rules are not modelled. The list is in [liability.md](docs/design/liability.md).
+- The UK and Brazilian regimes are applied as what-ifs to euro payments, the UK one at a fixed
+  ECB exchange rate. The EU regime follows a provisional agreement modelled from official
+  summaries, because the legal text could not be read here. Only `BR_MED` counts recovery
+  along the traced path. The other regimes count only the first receiving account, which
+  understates what cooperating banks may recover. Claim deadlines, vulnerability assessments
+  and several other rules are not modelled. The list is in
+  [liability.md](docs/design/liability.md).
+
+HTTP API:
+
+- There is no TLS, so run it on 127.0.0.1 only. Keys never expire and are rotated by editing
+  the key file and restarting.
+- Rate limits are in memory and cover one server process.
+- API calls other than holds and payment rejections are not logged per client.
+- The full list, with the test behind each mitigation, is in
+  [threat-model.md](docs/design/threat-model.md).
 
 ## Run
 
@@ -130,8 +173,27 @@ pytest
 python -m echtzeit.scenario_report --seed 7 --spread-seeds 10 --out docs/results/scenarios-seed-7.md
 ```
 
-The report takes about 80 seconds. CI runs `ruff` and `pytest` on Python 3.12 and 3.13 for
-every push.
+The report takes about 80 seconds. CI runs `ruff` and `pytest` on Python 3.12 and 3.13, and
+`bandit` and `pip-audit`, for every push.
+
+Run the API locally:
+
+```bash
+python -m echtzeit.api.auth new --client admin --role admin --keys keys.json
+python -m echtzeit.api.auth new --client bank-a --role psp --bic ECHTDEFF --keys keys.json
+ECHTZEIT_DATABASE_URL=sqlite:///echtzeit.db ECHTZEIT_API_KEYS_FILE=keys.json \
+  uvicorn --factory echtzeit.api.app:create_app_from_env --host 127.0.0.1 --port 8000
+```
+
+Each `new` command prints its key once. `keys.json` stores only hashes, is created with mode
+600 and must stay out of version control. The server refuses to start without it, or if other
+users can read it.
+
+On macOS with Python 3.13 or later, `import echtzeit` can fail after `pip install -e .`. In
+this project the editable-install `.pth` file in `.venv/lib/python3.*/site-packages` was found
+with the hidden flag set, and Python skips hidden `.pth` files. Run
+`chflags nohidden .venv/lib/python3.*/site-packages/__editable__.echtzeit-*.pth`. The tests do
+not depend on it, because `pyproject.toml` sets the pytest `pythonpath`.
 
 ## Security
 
@@ -144,13 +206,17 @@ Checked:
   never parse input. The second is the seeded random generator in the simulation, which is
   needed for reproducible runs. Payment identifiers come from `uuid4`.
 - `pip-audit` found no known vulnerabilities in the installed dependencies on 25 November
-  2026. This is a point-in-time result.
+  2026. This is a point-in-time result; CI repeats `bandit` and `pip-audit` on every push.
+- The API authenticates every call, enforces roles and per-bank scope, limits rates and body
+  sizes, refuses unknown request fields and hides internals in errors. A threat model lists
+  each threat with its mitigation and the test that shows it:
+  [threat-model.md](docs/design/threat-model.md).
 - No credentials, tokens or real personal data are stored in the repository.
 
 Not done yet:
 
-- There is no authentication, authorization or rate limiting, because there is no API yet.
-- There is no database encryption and no threat model document.
+- There is no TLS, no key expiry or rotation, and no per-client request log.
+- There is no database encryption and no retention period.
 - Message-level protection such as signing is not implemented.
 
 Do not expose this code to a network or use it with real money or real customer data.
@@ -190,6 +256,8 @@ code from them is copied into the repository.
   for the provisional EU regime and the receiving-PSP freeze.
 - ECB euro foreign exchange reference rate GBP/EUR of 24 November 2026, for converting the UK
   cap and excess.
+- Banco Central do Brasil: Resolução BCB nº 493 of 28 August 2025 and the Manual Operacional
+  do DICT, version 8.5, section 20, for the MED funds recovery.
 
 For local schema validation the XSD files were downloaded from public GitHub repositories
 (`sebastienrousseau/pacs008` and `prog-nov/iso20022-messages-for-go`). Only the schema files
