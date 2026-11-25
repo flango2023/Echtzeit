@@ -18,6 +18,27 @@ Implemented:
   following the EPC SCT Inst Inter-PSP Implementation Guidelines 2025 v1.0 (EPC122-16).
   Parsing uses `defusedxml`, so entity-expansion and external-entity input is refused.
 - Generated IBANs and BICs with valid check digits. They belong to no real bank.
+- Payment processing (`echtzeit.payments`): a `pacs.008` becomes a ledger transfer and the
+  reply is a `pacs.002`. Accounts carry an IBAN and a BIC, and the transfer stores the
+  message's UETR and end-to-end id for tracing. Checks, in order, with the reply code:
+  unknown IBAN `AC01`, BIC does not match the account `RC01`, same key with different
+  content `AM05`, message older than 10 seconds `AB05`, insufficient funds `MS03`.
+  A repeated message is answered as accepted and moves money once. This holds even when the
+  retry arrives after the 10-second limit, so a completed payment is never reported as
+  timed out. The idempotency key is the originator BIC plus the `TxId`.
+
+Processing limits:
+
+- The `MS03` answer for insufficient funds is this project's choice. The EPC lists no
+  inter-PSP code for it, because a real originator PSP refuses such a payment before it
+  creates a `pacs.008`.
+- The creditor name in the message is not compared with the account holder name. That
+  check (Verification of Payee) is planned together with the scam scenarios.
+- Rejected payments are not stored, so there is no audit log of rejections yet.
+- The 10-second limit is measured from the message's acceptance time against the processor's
+  clock. There is no model of network delay or clock skew.
+- The database schema changed (IBAN, BIC, UETR columns). There are no migrations, so a
+  database file created by an earlier version must be deleted.
 
 ISO 20022 coverage and limits:
 
@@ -42,8 +63,9 @@ Limits:
   with PostgreSQL row locks.
 - Only completed transfers are stored. A rejected transfer leaves no record.
 
-Not implemented yet: processing a `pacs.008` into a ledger transfer, scam scenarios, fraud
-scoring, liability report.
+Not implemented yet, in this order: holds and tracing of money across accounts, scam
+scenarios with fraud scoring, and a liability report that compares regimes (planned: UK,
+EU as provisional, and a no-refund baseline).
 
 ## Run the tests
 

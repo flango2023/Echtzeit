@@ -44,6 +44,9 @@ class Account(Base):
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_new_id)
     holder_name: Mapped[str] = mapped_column(String(200))
     kind: Mapped[str] = mapped_column(String(10), default=CUSTOMER)
+    # Payment identifiers. Only customer accounts have them; the system account has neither.
+    iban: Mapped[str | None] = mapped_column(String(34), unique=True, nullable=True)
+    bic: Mapped[str | None] = mapped_column(String(11), nullable=True)
     # Cached balance. The ledger is the source of truth; verify_invariants checks both agree.
     balance_cents: Mapped[int] = mapped_column(Integer, default=0)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow)
@@ -63,6 +66,9 @@ class Transfer(Base):
     creditor_id: Mapped[str] = mapped_column(ForeignKey("accounts.id"))
     amount_cents: Mapped[int] = mapped_column(Integer)
     reference: Mapped[str | None] = mapped_column(String(140), nullable=True)
+    # Identifiers from the payment message, kept so a payment can be traced end to end.
+    end_to_end_id: Mapped[str | None] = mapped_column(String(35), nullable=True)
+    uetr: Mapped[str | None] = mapped_column(String(36), nullable=True, index=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow)
 
 

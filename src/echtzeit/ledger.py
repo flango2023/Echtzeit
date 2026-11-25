@@ -15,6 +15,7 @@ import hashlib
 from dataclasses import dataclass, field
 
 from sqlalchemy import func, select, update
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, sessionmaker
 
 from echtzeit.errors import (
@@ -23,6 +24,7 @@ from echtzeit.errors import (
     InsufficientFunds,
     InvalidRequest,
 )
+from echtzeit.iso20022.identifiers import bic_is_valid, iban_is_valid
 from echtzeit.models import CUSTOMER, SYSTEM, Account, LedgerEntry, Transfer
 
 
@@ -45,10 +47,34 @@ class InvariantReport:
         return not self.problems
 
 
+@dataclass(frozen=True)
+class AccountInfo:
+    id: str
+    holder_name: str
+    kind: str
+    iban: str | None
+    bic: str | None
+    balance_cents: int
+
+
 def _request_hash(
-    debtor_id: str, creditor_id: str, amount_cents: int, reference: str | None
+    debtor_id: str,
+    creditor_id: str,
+    amount_cents: int,
+    reference: str | None,
+    end_to_end_id: str | None,
+    uetr: str | None,
 ) -> str:
-    canonical = f"{debtor_id}|{creditor_id}|{amount_cents}|{reference or ''}"
+    canonical = "|".join(
+        [
+            debtor_id,
+            creditor_id,
+            str(amount_cents),
+            reference or "",
+            end_to_end_id or "",
+            uetr or "",
+        ]
+    )
     return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
 
 
@@ -56,16 +82,49 @@ class Ledger:
     def __init__(self, sessions: sessionmaker[Session]):
         self._sessions = sessions
 
-    def create_account(self, holder_name: str, kind: str = CUSTOMER) -> str:
+    def create_account(
+        self,
+        holder_name: str,
+        kind: str = CUSTOMER,
+        *,
+        iban: str | None = None,
+        bic: str | None = None,
+    ) -> str:
         if not holder_name or not holder_name.strip():
             raise InvalidRequest("holder_name must not be empty")
         if kind not in (CUSTOMER, SYSTEM):
             raise InvalidRequest(f"unknown account kind: {kind!r}")
-        with self._sessions.begin() as session:
-            account = Account(holder_name=holder_name.strip(), kind=kind)
-            session.add(account)
-            session.flush()
-            return account.id
+        if kind == SYSTEM and (iban is not None or bic is not None):
+            # A system account may go negative, so it must never be reachable by a payment message.
+            raise InvalidRequest("a system account cannot have an IBAN or BIC")
+        if iban is not None and not iban_is_valid(iban):
+            raise InvalidRequest("iban is not valid")
+        if bic is not None and not bic_is_valid(bic):
+            raise InvalidRequest("bic is not valid")
+        if (iban is None) != (bic is None):
+            raise InvalidRequest("iban and bic must be given together")
+        try:
+            with self._sessions.begin() as session:
+                account = Account(holder_name=holder_name.strip(), kind=kind, iban=iban, bic=bic)
+                session.add(account)
+                session.flush()
+                return account.id
+        except IntegrityError as exc:
+            raise InvalidRequest("iban is already in use") from exc
+
+    def find_account_by_iban(self, iban: str) -> AccountInfo | None:
+        with self._sessions() as session, session.begin():
+            account = session.scalar(select(Account).where(Account.iban == iban))
+            if account is None:
+                return None
+            return AccountInfo(
+                id=account.id,
+                holder_name=account.holder_name,
+                kind=account.kind,
+                iban=account.iban,
+                bic=account.bic,
+                balance_cents=account.balance_cents,
+            )
 
     def balance(self, account_id: str) -> int:
         with self._sessions() as session, session.begin():
@@ -82,19 +141,17 @@ class Ledger:
         creditor_id: str,
         amount_cents: int,
         reference: str | None = None,
+        end_to_end_id: str | None = None,
+        uetr: str | None = None,
     ) -> TransferResult:
         self._validate(idempotency_key, debtor_id, creditor_id, amount_cents)
-        request_hash = _request_hash(debtor_id, creditor_id, amount_cents, reference)
+        request_hash = _request_hash(
+            debtor_id, creditor_id, amount_cents, reference, end_to_end_id, uetr
+        )
 
         with self._sessions.begin() as session:
-            existing = session.scalar(
-                select(Transfer).where(Transfer.idempotency_key == idempotency_key)
-            )
+            existing = self._find_existing(session, idempotency_key, request_hash)
             if existing is not None:
-                if existing.request_hash != request_hash:
-                    raise IdempotencyConflict(
-                        f"idempotency key {idempotency_key!r} was used with a different request"
-                    )
                 return self._result(existing, replayed=True)
 
             self._require_accounts(session, debtor_id, creditor_id)
@@ -107,13 +164,52 @@ class Ledger:
                 creditor_id=creditor_id,
                 amount_cents=amount_cents,
                 reference=reference,
+                end_to_end_id=end_to_end_id,
+                uetr=uetr,
             )
             session.add(transfer)
             session.flush()
             self._write_entries(session, transfer)
             return self._result(transfer, replayed=False)
 
+    def lookup_transfer(
+        self,
+        *,
+        idempotency_key: str,
+        debtor_id: str,
+        creditor_id: str,
+        amount_cents: int,
+        reference: str | None = None,
+        end_to_end_id: str | None = None,
+        uetr: str | None = None,
+    ) -> TransferResult | None:
+        """Return the stored transfer for this key, or None if it was never completed.
+
+        Raises IdempotencyConflict if the key exists with a different payload. Nothing is
+        written. A caller uses this to answer a repeated request before applying any rule
+        that depends on the current time, so a late retry of a completed payment never
+        reports a failure for money that has moved.
+        """
+        self._validate(idempotency_key, debtor_id, creditor_id, amount_cents)
+        request_hash = _request_hash(
+            debtor_id, creditor_id, amount_cents, reference, end_to_end_id, uetr
+        )
+        with self._sessions() as session, session.begin():
+            existing = self._find_existing(session, idempotency_key, request_hash)
+            return None if existing is None else self._result(existing, replayed=True)
+
     # -- internals ---------------------------------------------------------
+
+    @staticmethod
+    def _find_existing(session: Session, idempotency_key: str, request_hash: str):
+        existing = session.scalar(
+            select(Transfer).where(Transfer.idempotency_key == idempotency_key)
+        )
+        if existing is not None and existing.request_hash != request_hash:
+            raise IdempotencyConflict(
+                f"idempotency key {idempotency_key!r} was used with a different request"
+            )
+        return existing
 
     @staticmethod
     def _validate(key: str, debtor_id: str, creditor_id: str, amount_cents: int) -> None:
