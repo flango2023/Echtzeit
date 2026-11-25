@@ -15,19 +15,21 @@ recovered under three policies, and what does that cost normal customers?
 
 The receiving-side freeze models the provisional EU Payment Services Regulation, under which
 the receiving provider must freeze transactions it finds suspicious (European Parliament press
-release on the payment services deal, November 2025). The final legal text is not yet
-adopted, and this simulator does not claim to implement it.
+release 20251121IPR31540, read through search-result excerpts because the page refused
+automated access). The final legal text is not yet adopted, and this simulator does not claim
+to implement it.
 
 ## Scenario patterns and their sources
 
 The patterns are paraphrased from the EPC *2025 Payments Threats and Fraud Trends Report*
-(EPC162-24, version 2.0). They stay at the level of detail that report publishes.
+(EPC162-24, version 2.0, issued 19 November 2025). They stay at the level of detail that
+report publishes.
 
 | Scenario | What happens | Source |
 |---|---|---|
-| Safe account | A fraudster posing as the bank tells the customer the account is at risk and that the money must go to a "safe" account the fraudster controls. The customer makes the payment. | EPC162-24, section 3.1.4 (bank employee impersonation, safe account fraud) |
-| Invoice with a changed IBAN | An invoice keeps the real supplier's name but carries the IBAN of an account the fraudster controls. The business pays it. | EPC162-24: the invoicing stage is exposed to IBAN manipulation |
-| Money mules | Mule accounts receive the money and pass it on so it cannot be tracked, often ending in a cash withdrawal. One or two levels of mules. | EPC162-24, section 3.1.7 (most cases involve no more than one or two levels of mules) |
+| Safe account | A fraudster posing as the bank tells the customer the account is at risk and that the money must go to a "safe" account the fraudster controls. The customer makes the payment. | EPC162-24, section 2, page 17 (bank employee impersonation, safe account fraud) |
+| Invoice with a changed IBAN | An invoice keeps the real supplier's name but carries the IBAN of an account the fraudster controls. The business pays it. | EPC162-24, executive summary, page 7 (the invoicing stage is exposed to IBAN manipulation) |
+| Money mules | Mule accounts receive the money and pass it on so it cannot be tracked, often ending in a cash withdrawal. One or two levels of mules. | EPC162-24, section 3.1.7.1, page 44 (most cases involve no more than one or two levels of mules) |
 
 Verification of Payee outcomes (match, close match, no match, verification not possible) come
 from the EPC VoP scheme FAQ. How names are compared is not defined by the EPC and is this
@@ -50,7 +52,7 @@ choices and are not calibrated. They live in `RiskConfig`, and the results file 
 Decision: 70 points or more blocks, 40 or more warns. A warned payer decides. The probability
 that a warned victim goes ahead is an assumption (`victim_ignores_warning`). Fraudsters are
 reported to coach victims past warnings (EPC162-24 notes they convince customers that the
-system has a flaw), but the value used is not measured.
+system has a flaw, section 2, page 17), but the value used is not measured.
 
 ## How the simulation keeps the comparison fair
 
@@ -82,4 +84,4 @@ system has a flaw), but the value used is not measured.
 
 - Learning models of any kind. The rules are fixed and transparent on purpose.
 - Customer-side detail such as device or session signals.
-- Who pays for a loss. That is the next step, the regime-based liability report.
+- Who pays for a loss is a separate step: see [liability.md](liability.md).

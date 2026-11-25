@@ -84,7 +84,7 @@ System accounts (the source of fictional money) can go negative. They never pass
 on, and traced money that reaches them stays there.
 
 Result: for every account, the traced money that arrived, the money still there, the part of it
-held by this payment's holds, the money that moved on and the money not followed; plus the
+that active holds stop from moving, the money that moved on and the money not followed; plus the
 hops. Conservation is checked by tests: the payment amount equals the traced money remaining
 on all accounts plus the money not followed.
 
