@@ -32,6 +32,13 @@ def _utcnow() -> datetime:
     return datetime.now(UTC)
 
 
+def to_db_time(moment: datetime) -> datetime:
+    """Timestamps are stored as naive UTC. An aware value is converted; a naive one is taken as UTC."""
+    if moment.tzinfo is None:
+        return moment
+    return moment.astimezone(UTC).replace(tzinfo=None)
+
+
 class Account(Base):
     __tablename__ = "accounts"
     __table_args__ = (

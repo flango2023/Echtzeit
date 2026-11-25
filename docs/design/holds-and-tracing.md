@@ -59,10 +59,20 @@ choose one of two rules (there is no default):
 These are two bounds for an estimate. They are not legal tracing doctrines, and no claim is
 made about which one a court or a bank would apply. A report should show both.
 
-Holds take part in the replay. Active holds tagged with the traced UETR pin traced money,
-other active holds pin other money, and pinned money cannot be part of a debit. This keeps the
-replay consistent with what the ledger allowed. If the replay ever meets a debit it cannot
-cover, it raises `TraceInconsistency` instead of returning a wrong number.
+Holds take part in the replay. A hold stops money whatever its tag, so the ledger never lets
+held money move. The attribution question is only which pool a hold stops first: holds
+tagged with the traced UETR stop traced money first, other holds stop other money first, and
+either spills onto the other pool when its own pool is too small. Together the stopped parts
+always equal the smaller of the balance and all active holds, which is exactly what the ledger
+refuses to let move. Money stopped this way counts as secured.
+
+This matters because a receiving bank may freeze a mule account without knowing which scam
+the money came from. An earlier version counted only tagged holds as securing traced money and
+under-reported recovery in that case. A test now covers it.
+
+Because the replay's spendable money always equals the ledger's, a debit the replay cannot
+cover can only mean a bug or tampering. The replay then raises `TraceInconsistency` instead of
+returning a wrong number.
 
 Depth and the depth limit: an account's depth is the fewest hops from the receiving account
 among the hops replayed so far. Traced money that leaves an account at the depth limit is

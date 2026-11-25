@@ -116,7 +116,7 @@ class InstantPaymentProcessor:
             return self._reject(message, key, now, TIMEOUT)
 
         try:
-            transfer = self._ledger.transfer(**request)
+            transfer = self._ledger.transfer(**request, booked_at=now)
         except InsufficientFunds:
             return self._reject(message, key, now, NOT_SPECIFIED)
         except IdempotencyConflict:

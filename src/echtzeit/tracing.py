@@ -51,7 +51,7 @@ class AccountTrace:
     depth: int  # fewest hops from the first account, among hops replayed so far
     traced_in_cents: int  # all traced money that arrived (for the first account: the payment)
     remaining_cents: int  # traced money still on the account
-    secured_cents: int  # part of the remaining money covered by active holds of this payment
+    secured_cents: int  # part of the remaining money that active holds stop from moving
     moved_on_cents: int  # traced money that left the account (followed or not)
     unfollowed_cents: int  # traced money that left beyond the depth limit
 
@@ -165,14 +165,25 @@ class _Pools:
     held_other: int = 0  # all other active holds
     node: AccountTrace | None = None  # set once traced money has arrived
 
+    def pinned(self) -> tuple[int, int]:
+        """Money that active holds stop from moving, as (traced, other).
+
+        Holds tagged with the traced payment pin traced money first. Other holds pin other money
+        first. Either kind spills onto the other pool when its own pool is too small, because the
+        ledger stops the whole held amount whatever its origin. Together the two parts always
+        equal min(balance, all holds), the amount the ledger itself refuses to let move.
+        """
+        traced = min(self.traced, self.held_tagged + max(0, self.held_other - self.other))
+        other = min(self.other, self.held_other + max(0, self.held_tagged - self.traced))
+        return traced, other
+
     def split_debit(self, debit: int, attribution: Attribution, where: str) -> int:
         """Remove a debit from the pools. Returns the traced part."""
         if self.kind == SYSTEM:
             # System accounts may go negative and never pass traced money on.
             self.other -= debit
             return 0
-        pinned_traced = min(self.traced, self.held_tagged)
-        pinned_other = min(self.other, self.held_other + (self.held_tagged - pinned_traced))
+        pinned_traced, pinned_other = self.pinned()
         spendable_traced = self.traced - pinned_traced
         spendable_other = self.other - pinned_other
         if debit > spendable_traced + spendable_other:
@@ -267,7 +278,7 @@ def _trace(session: Session, uetr: str, attribution: Attribution, max_depth: int
     for node in accounts:
         pool = pools[node.account_id]
         node.remaining_cents = pool.traced
-        node.secured_cents = min(pool.traced, max(pool.held_tagged, 0))
+        node.secured_cents = pool.pinned()[0]
 
     return TraceResult(uetr, attribution, max_depth, payment.amount_cents, accounts, hops)
 

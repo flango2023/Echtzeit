@@ -263,8 +263,8 @@ def test_freezing_twice_does_not_hold_the_same_money_again(ledger, net):
     assert len(ledger.active_holds(m1)) == 1
 
 
-def test_a_freeze_can_secure_less_than_it_found(ledger, net):
-    """Traced money is on the account, but part of the balance is already held for another reason."""
+def test_a_hold_placed_for_another_reason_still_counts_as_securing_traced_money(ledger, net):
+    """Holds stop money whatever their tag. The rule only decides which pool they stop first."""
     victim = net.account("v", 1_000)
     m1 = net.account("m1", 300)
     uetr = net.pay(victim, m1, 1_000)
@@ -272,8 +272,11 @@ def test_a_freeze_can_secure_less_than_it_found(ledger, net):
 
     freeze = freeze_traced_funds(ledger, uetr, attribution=OWN, reason="scam", placed_by="test")
 
-    assert freeze.requested_cents == 1_000
+    # The other hold stops 1,100: 300 of the account's own money and 800 of the traced money.
+    assert freeze.trace.secured_cents == 800
+    assert freeze.requested_cents == 200
     assert freeze.secured_cents == 200
+    assert trace_payment(ledger, uetr, attribution=OWN).secured_cents == 1_000
 
 
 def test_the_freeze_is_atomic_when_a_later_step_fails(ledger, net, monkeypatch):
@@ -331,6 +334,21 @@ def test_a_released_hold_lets_the_traced_money_move_again(ledger, net):
     assert result.root.remaining_cents == 0
     assert by_account(result)[m2].traced_in_cents == 1_000
     assert result.secured_cents == 0
+
+
+def test_an_untagged_hold_larger_than_the_own_money_stops_traced_money_too(ledger, net):
+    """A receiving bank may freeze a mule account without knowing which scam the money came from."""
+    victim = net.account("v", 1_000)
+    m1, m2 = net.account("m1", 100), net.account("m2")
+    uetr = net.pay(victim, m1, 1_000)
+    ledger.place_hold(m1, 900, reason="suspicious pass-through", placed_by="bank")
+    net.pay(m1, m2, 200)
+
+    for attribution in BOTH:
+        result = trace_payment(ledger, uetr, attribution=attribution)
+        assert result.root.secured_cents == 800
+        assert result.secured_cents == 800
+        assert_conserved(result)
 
 
 def test_an_unrelated_hold_pins_other_money_not_traced_money(ledger, net):
@@ -394,4 +412,6 @@ def test_random_activity_keeps_every_trace_consistent_with_the_ledger(ledger, ne
             for node in result.nodes():
                 assert 0 <= node.remaining_cents <= ledger.balance(node.account_id)
                 assert 0 <= node.secured_cents <= node.remaining_cents
+                held = ledger.balance(node.account_id) - ledger.available_balance(node.account_id)
+                assert node.secured_cents <= held
                 assert node.traced_in_cents == node.remaining_cents + node.moved_on_cents

@@ -15,6 +15,7 @@ import hashlib
 from collections.abc import Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass, field
+from datetime import UTC, datetime
 
 from sqlalchemy import func, select, update
 from sqlalchemy.exc import IntegrityError
@@ -29,7 +30,16 @@ from echtzeit.errors import (
 )
 from echtzeit.holds import HoldInfo
 from echtzeit.iso20022.identifiers import bic_is_valid, iban_is_valid
-from echtzeit.models import CUSTOMER, SYSTEM, Account, Hold, HoldRelease, LedgerEntry, Transfer
+from echtzeit.models import (
+    CUSTOMER,
+    SYSTEM,
+    Account,
+    Hold,
+    HoldRelease,
+    LedgerEntry,
+    Transfer,
+    to_db_time,
+)
 
 
 @dataclass(frozen=True)
@@ -210,8 +220,15 @@ class Ledger:
         reference: str | None = None,
         end_to_end_id: str | None = None,
         uetr: str | None = None,
+        booked_at: datetime | None = None,
     ) -> TransferResult:
+        """Move money atomically. `booked_at` sets the booking time (default: now).
+
+        The booking time is not part of the idempotency check: a retry at a later moment is
+        the same request.
+        """
         self._validate(idempotency_key, debtor_id, creditor_id, amount_cents)
+        booked = to_db_time(booked_at or datetime.now(UTC))
         request_hash = _request_hash(
             debtor_id, creditor_id, amount_cents, reference, end_to_end_id, uetr
         )
@@ -233,6 +250,7 @@ class Ledger:
                 reference=reference,
                 end_to_end_id=end_to_end_id,
                 uetr=uetr,
+                created_at=booked,
             )
             session.add(transfer)
             session.flush()
@@ -337,11 +355,13 @@ class Ledger:
                     transfer_id=transfer.id,
                     account_id=transfer.debtor_id,
                     amount_cents=-transfer.amount_cents,
+                    created_at=transfer.created_at,
                 ),
                 LedgerEntry(
                     transfer_id=transfer.id,
                     account_id=transfer.creditor_id,
                     amount_cents=transfer.amount_cents,
+                    created_at=transfer.created_at,
                 ),
             ]
         )
