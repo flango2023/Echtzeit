@@ -77,6 +77,18 @@ class AccountInfo:
         return self.balance_cents - self.held_cents
 
 
+def _account_info(account: Account) -> AccountInfo:
+    return AccountInfo(
+        id=account.id,
+        holder_name=account.holder_name,
+        kind=account.kind,
+        iban=account.iban,
+        bic=account.bic,
+        balance_cents=account.balance_cents,
+        held_cents=account.held_cents,
+    )
+
+
 def _request_hash(
     debtor_id: str,
     creditor_id: str,
@@ -135,17 +147,46 @@ class Ledger:
     def find_account_by_iban(self, iban: str) -> AccountInfo | None:
         with self._sessions() as session, session.begin():
             account = session.scalar(select(Account).where(Account.iban == iban))
+            return None if account is None else _account_info(account)
+
+    def account_info(self, account_id: str) -> AccountInfo:
+        with self._sessions() as session, session.begin():
+            account = session.get(Account, account_id)
             if account is None:
-                return None
-            return AccountInfo(
-                id=account.id,
-                holder_name=account.holder_name,
-                kind=account.kind,
-                iban=account.iban,
-                bic=account.bic,
-                balance_cents=account.balance_cents,
-                held_cents=account.held_cents,
+                raise AccountNotFound(account_id)
+            return _account_info(account)
+
+    def ensure_system_account(self, name: str) -> str:
+        """The id of the system account with this name, created if it does not exist."""
+        with self._sessions.begin() as session:
+            existing = session.scalar(
+                select(Account.id).where(Account.kind == SYSTEM, Account.holder_name == name)
             )
+            if existing is not None:
+                return existing
+            account = Account(holder_name=name, kind=SYSTEM)
+            session.add(account)
+            session.flush()
+            return account.id
+
+    def hold_status(self, hold_id: str) -> tuple[HoldInfo, bool] | None:
+        """A hold and whether it has been released, or None if it does not exist."""
+        with self._sessions() as session, session.begin():
+            hold = session.get(Hold, hold_id)
+            if hold is None:
+                return None
+            released = session.get(HoldRelease, hold_id) is not None
+            return holds.info(hold), released
+
+    def payment_accounts(self, uetr: str) -> tuple[AccountInfo, AccountInfo] | None:
+        """Debtor and creditor account of the payment with this UETR, or None."""
+        with self._sessions() as session, session.begin():
+            transfer = session.scalar(select(Transfer).where(Transfer.uetr == uetr))
+            if transfer is None:
+                return None
+            debtor = session.get(Account, transfer.debtor_id)
+            creditor = session.get(Account, transfer.creditor_id)
+            return _account_info(debtor), _account_info(creditor)
 
     @contextmanager
     def transaction(self) -> Iterator[Session]:

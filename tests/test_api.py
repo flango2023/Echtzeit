@@ -1,0 +1,455 @@
+import json
+import os
+import stat
+from datetime import UTC, date, datetime
+
+import pytest
+from fastapi.testclient import TestClient
+
+from echtzeit.api.app import create_app, create_app_from_env
+from echtzeit.api.auth import KeyFileError, KeyStore, Role, add_key, hash_key
+from echtzeit.api.ratelimit import RateLimiter
+from echtzeit.iso20022 import pacs002, pacs008
+from echtzeit.iso20022.identifiers import make_german_iban, new_uetr
+
+BANK_A, BANK_B, BANK_C = "ECHTDEFF", "ECHTDEF1", "ECHTDEF2"
+NOW = datetime(2026, 11, 25, 12, 0, tzinfo=UTC)
+KEYS = {
+    "bank-a": "ez_bank_a_test_key_0000000000000000000000000000",
+    "bank-b": "ez_bank_b_test_key_0000000000000000000000000000",
+    "bank-c": "ez_bank_c_test_key_0000000000000000000000000000",
+    "auditor": "ez_auditor_test_key_000000000000000000000000000",
+    "admin": "ez_admin_test_key_00000000000000000000000000000",
+}
+
+
+def keystore() -> KeyStore:
+    entries = []
+    for client_id, key in KEYS.items():
+        entry = {"client_id": client_id, "key_sha256": hash_key(key)}
+        if client_id.startswith("bank-"):
+            entry["role"] = "psp"
+            entry["bic"] = {"bank-a": BANK_A, "bank-b": BANK_B, "bank-c": BANK_C}[client_id]
+        else:
+            entry["role"] = client_id
+        entries.append(entry)
+    return KeyStore(entries)
+
+
+def auth(client_id: str) -> dict:
+    return {"Authorization": f"Bearer {KEYS[client_id]}"}
+
+
+@pytest.fixture
+def api(ledger, audit):
+    app = create_app(ledger, audit, keystore(), clock=lambda: NOW)
+    return TestClient(app)
+
+
+@pytest.fixture
+def world(api):
+    """Alice at bank A with money, Bob at bank B."""
+    alice = {"holder_name": "Alice Example", "iban": make_german_iban("1"), "bic": BANK_A}
+    bob = {"holder_name": "Bob Example", "iban": make_german_iban("2"), "bic": BANK_B}
+    for account in (alice, bob):
+        assert api.post("/v1/accounts", json=account, headers=auth("admin")).status_code == 201
+    deposit = {"amount_cents": 100_000, "idempotency_key": "alice-1"}
+    response = api.post(
+        f"/v1/accounts/{alice['iban']}/deposits", json=deposit, headers=auth("admin")
+    )
+    assert response.status_code == 201
+    return alice, bob
+
+
+def payment(alice, bob, cents=10_000, **overrides) -> bytes:
+    fields = {
+        "msg_id": "MSG-1",
+        "created_at": NOW,
+        "end_to_end_id": "E2E-1",
+        "tx_id": "TX-1",
+        "uetr": new_uetr(),
+        "amount_cents": cents,
+        "settlement_date": date(2026, 11, 25),
+        "accepted_at": NOW,
+        "debtor": pacs008.Party(alice["holder_name"], alice["iban"], alice["bic"]),
+        "creditor": pacs008.Party(bob["holder_name"], bob["iban"], bob["bic"]),
+    }
+    fields.update(overrides)
+    return pacs008.build(pacs008.CreditTransfer(**fields))
+
+
+def send(api, client_id, xml):
+    headers = {**auth(client_id), "Content-Type": "application/xml"}
+    return api.post("/v1/payments", content=xml, headers=headers)
+
+
+# -- authentication -------------------------------------------------------------------------
+
+
+def test_health_needs_no_key_and_carries_safety_headers(api):
+    response = api.get("/v1/health")
+    assert response.status_code == 200 and response.json() == {"status": "ok"}
+    assert response.headers["cache-control"] == "no-store"
+    assert response.headers["x-content-type-options"] == "nosniff"
+    assert response.headers["x-request-id"]
+
+
+@pytest.mark.parametrize(
+    "headers",
+    [{}, {"Authorization": "Bearer wrong"}, {"Authorization": f"Basic {KEYS['admin']}"},
+     {"Authorization": "Bearer ez_" + "x" * 300}],
+)  # fmt: skip
+def test_missing_or_wrong_keys_are_refused(api, headers):
+    response = api.get("/v1/invariants", headers=headers)
+    assert response.status_code == 401
+    assert response.headers["www-authenticate"] == "Bearer"
+    assert response.headers["content-type"] == "application/problem+json"
+
+
+def test_repeated_failed_logins_are_slowed_down(ledger, audit):
+    slow = RateLimiter(capacity=3, refill_per_second=0.001, clock=lambda: 0.0)
+    api = TestClient(create_app(ledger, audit, keystore(), failed_auth_limiter=slow))
+    codes = [
+        api.get("/v1/invariants", headers={"Authorization": "Bearer ez_guess"}).status_code
+        for _ in range(5)
+    ]
+    assert codes == [401, 401, 401, 429, 429]
+
+
+def test_each_client_is_rate_limited(ledger, audit):
+    tight = RateLimiter(capacity=2, refill_per_second=0.5, clock=lambda: 0.0)
+    api = TestClient(create_app(ledger, audit, keystore(), limiter=tight))
+    codes = [api.get("/v1/invariants", headers=auth("auditor")).status_code for _ in range(3)]
+    assert codes == [200, 200, 429]
+    limited = api.get("/v1/invariants", headers=auth("auditor"))
+    assert int(limited.headers["retry-after"]) >= 1
+    assert api.get("/v1/invariants", headers=auth("admin")).status_code == 200  # own bucket
+
+
+# -- accounts -------------------------------------------------------------------------------
+
+
+def test_only_admin_creates_and_funds_accounts(api, world):
+    alice, _ = world
+    account = {"holder_name": "Eve", "iban": make_german_iban("3"), "bic": BANK_A}
+    assert api.post("/v1/accounts", json=account, headers=auth("bank-a")).status_code == 403
+    assert api.post("/v1/accounts", json=account, headers=auth("auditor")).status_code == 403
+    deposit = {"amount_cents": 1, "idempotency_key": "x"}
+    assert (
+        api.post(
+            f"/v1/accounts/{alice['iban']}/deposits", json=deposit, headers=auth("bank-a")
+        ).status_code
+        == 403
+    )
+
+
+def test_a_deposit_is_idempotent(api, world):
+    alice, _ = world
+    deposit = {"amount_cents": 100_000, "idempotency_key": "alice-1"}
+    again = api.post(f"/v1/accounts/{alice['iban']}/deposits", json=deposit, headers=auth("admin"))
+    assert again.json()["replayed"] is True
+    assert (
+        api.get(f"/v1/accounts/{alice['iban']}", headers=auth("bank-a")).json()["balance_cents"]
+        == 100_000
+    )
+
+
+def test_a_bank_sees_its_own_accounts_and_not_others(api, world):
+    alice, bob = world
+    own = api.get(f"/v1/accounts/{alice['iban']}", headers=auth("bank-a"))
+    assert own.status_code == 200 and own.json()["available_cents"] == 100_000
+    other = api.get(f"/v1/accounts/{bob['iban']}", headers=auth("bank-a"))
+    missing = api.get(f"/v1/accounts/{make_german_iban('99')}", headers=auth("bank-a"))
+    assert other.status_code == missing.status_code == 404
+    assert other.json() == missing.json()  # cannot tell "exists elsewhere" from "does not exist"
+    assert api.get(f"/v1/accounts/{bob['iban']}", headers=auth("auditor")).status_code == 200
+
+
+def test_invalid_input_is_refused_without_echoing_it(api):
+    secret = "ez_this_value_must_not_come_back"
+    body = {"holder_name": secret, "iban": 12345, "bic": BANK_A}
+    response = api.post("/v1/accounts", json=body, headers=auth("admin"))
+    assert response.status_code == 422
+    assert secret not in response.text and "12345" not in response.text
+    extra = {"holder_name": "X", "iban": make_german_iban("5"), "bic": BANK_A, "kind": "SYSTEM"}
+    assert api.post("/v1/accounts", json=extra, headers=auth("admin")).status_code == 422
+
+
+def test_unexpected_errors_do_not_leak_details(ledger, audit, monkeypatch):
+    api = TestClient(create_app(ledger, audit, keystore()), raise_server_exceptions=False)
+
+    def broken(*_args, **_kwargs):
+        raise RuntimeError("database password is hunter2")
+
+    monkeypatch.setattr(type(ledger), "verify_invariants", broken)
+    response = api.get("/v1/invariants", headers=auth("auditor"))
+    assert response.status_code == 500
+    assert "hunter2" not in response.text and response.json()["title"] == "Internal error"
+
+
+# -- payments -------------------------------------------------------------------------------
+
+
+def test_a_bank_sends_a_payment_and_gets_a_pacs002(api, world):
+    alice, bob = world
+    response = send(api, "bank-a", payment(alice, bob))
+    assert response.status_code == 200
+    assert response.headers["content-type"].startswith("application/xml")
+    assert pacs002.parse(response.content).status == pacs002.ACCEPTED
+    assert (
+        api.get(f"/v1/accounts/{bob['iban']}", headers=auth("bank-b")).json()["balance_cents"]
+        == 10_000
+    )
+
+
+def test_a_bank_cannot_send_for_another_bank(api, world):
+    alice, bob = world
+    assert send(api, "bank-b", payment(alice, bob)).status_code == 403
+    assert send(api, "auditor", payment(alice, bob)).status_code == 403
+    assert (
+        api.get(f"/v1/accounts/{bob['iban']}", headers=auth("bank-b")).json()["balance_cents"] == 0
+    )
+
+
+def test_bad_messages_are_refused_with_the_problems_listed(api, world):
+    response = send(api, "bank-a", b"<not-a-payment/>")
+    assert response.status_code == 400
+    assert response.json()["problems"]
+    wrong_type = api.post(
+        "/v1/payments", content=b"<x/>", headers={**auth("bank-a"), "Content-Type": "text/plain"}
+    )
+    assert wrong_type.status_code == 415
+
+
+def test_large_bodies_are_refused_with_or_without_a_length(ledger, audit, world):
+    api = TestClient(create_app(ledger, audit, keystore(), max_body_bytes=1_000))
+    headers = {**auth("bank-a"), "Content-Type": "application/xml"}
+    assert api.post("/v1/payments", content=b"x" * 1_001, headers=headers).status_code == 413
+
+    def chunks():
+        for _ in range(5):
+            yield b"x" * 400
+
+    chunked = api.post("/v1/payments", content=chunks(), headers=headers)
+    assert chunked.status_code == 413
+
+
+def test_vop_and_risk_assessment(api, world):
+    alice, bob = world
+    vop = api.post(
+        "/v1/vop", json={"iban": bob["iban"], "name": "Bob Exampel"}, headers=auth("bank-a")
+    )
+    assert vop.json() == {"outcome": "CLOSE_MATCH", "suggested_name": "Bob Example"}
+    body = {
+        "debtor_iban": alice["iban"],
+        "creditor_iban": bob["iban"],
+        "name": "Bob Example",
+        "amount_cents": 90_000,
+    }
+    own = api.post("/v1/risk/assessments", json=body, headers=auth("bank-a"))
+    assert own.status_code == 200
+    assert {r["rule"] for r in own.json()["reasons"]} >= {"NEW_PAYEE", "BALANCE_DRAIN"}
+    assert api.post("/v1/risk/assessments", json=body, headers=auth("bank-b")).status_code == 404
+
+
+# -- holds ----------------------------------------------------------------------------------
+
+
+def test_holds_are_placed_and_released_by_the_account_bank_only(api, world):
+    alice, _bob = world
+    body = {"amount_cents": 40_000, "reason": "suspected scam"}
+    assert (
+        api.post(
+            f"/v1/accounts/{alice['iban']}/holds", json=body, headers=auth("bank-b")
+        ).status_code
+        == 404
+    )
+    created = api.post(f"/v1/accounts/{alice['iban']}/holds", json=body, headers=auth("bank-a"))
+    assert created.status_code == 201
+    hold = created.json()
+    assert hold["placed_by"] == "bank-a"  # taken from the key, never from the request
+    assert (
+        api.get(f"/v1/accounts/{alice['iban']}", headers=auth("bank-a")).json()["available_cents"]
+        == 60_000
+    )
+
+    release = {"reason": "cleared"}
+    assert (
+        api.post(
+            f"/v1/holds/{hold['id']}/release", json=release, headers=auth("bank-b")
+        ).status_code
+        == 404
+    )
+    assert (
+        api.post(
+            f"/v1/holds/{hold['id']}/release", json=release, headers=auth("bank-a")
+        ).status_code
+        == 200
+    )
+    assert (
+        api.post(
+            f"/v1/holds/{hold['id']}/release", json=release, headers=auth("bank-a")
+        ).status_code
+        == 409
+    )
+
+
+def test_who_placed_a_hold_cannot_be_spoofed(api, world):
+    alice, _ = world
+    body = {"amount_cents": 1, "reason": "r", "placed_by": "bank-b"}
+    assert (
+        api.post(
+            f"/v1/accounts/{alice['iban']}/holds", json=body, headers=auth("bank-a")
+        ).status_code
+        == 422
+    )
+
+
+def test_a_hold_beyond_spendable_money_is_a_conflict(api, world):
+    alice, _ = world
+    body = {"amount_cents": 100_001, "reason": "r"}
+    assert (
+        api.post(
+            f"/v1/accounts/{alice['iban']}/holds", json=body, headers=auth("bank-a")
+        ).status_code
+        == 409
+    )
+    partial = api.post(
+        f"/v1/accounts/{alice['iban']}/holds",
+        json={**body, "mode": "available"},
+        headers=auth("bank-a"),
+    )
+    assert partial.status_code == 201 and partial.json()["amount_cents"] == 100_000
+
+
+# -- trace and freeze -----------------------------------------------------------------------
+
+
+@pytest.fixture
+def chain(api, world, ledger):
+    """Alice (bank A) pays Bob (bank B); Bob forwards part to Carol (bank C)."""
+    alice, bob = world
+    carol = {"holder_name": "Carol Example", "iban": make_german_iban("4"), "bic": BANK_C}
+    api.post("/v1/accounts", json=carol, headers=auth("admin"))
+    uetr = new_uetr()
+    assert send(api, "bank-a", payment(alice, bob, 50_000, uetr=uetr)).status_code == 200
+    onward = payment(
+        bob, carol, 30_000, uetr=new_uetr(), tx_id="TX-2", msg_id="MSG-2", end_to_end_id="E2E-2"
+    )
+    assert send(api, "bank-b", onward).status_code == 200
+    return uetr, alice, bob, carol
+
+
+def test_trace_shows_other_banks_only_as_amounts(api, chain):
+    uetr, _alice, bob, carol = chain
+    query = "?attribution=TRACED_FUNDS_FIRST"
+    for_a = api.get(f"/v1/payments/{uetr}/trace{query}", headers=auth("bank-a"))
+    assert for_a.status_code == 200
+    accounts = {a["bic"]: a for a in for_a.json()["accounts"]}
+    assert accounts[BANK_B]["remaining_cents"] == 20_000 and "iban" not in accounts[BANK_B]
+    assert accounts[BANK_C]["remaining_cents"] == 30_000 and "iban" not in accounts[BANK_C]
+
+    for_b = {
+        a["bic"]: a
+        for a in api.get(f"/v1/payments/{uetr}/trace{query}", headers=auth("bank-b")).json()[
+            "accounts"
+        ]
+    }
+    assert for_b[BANK_B]["iban"] == bob["iban"] and "iban" not in for_b[BANK_C]
+
+    full = api.get(f"/v1/payments/{uetr}/trace{query}", headers=auth("auditor")).json()["accounts"]
+    assert {a["iban"] for a in full} == {bob["iban"], carol["iban"]}
+
+    assert api.get(f"/v1/payments/{uetr}/trace{query}", headers=auth("bank-c")).status_code == 404
+    assert api.get(f"/v1/payments/{uetr}/trace{query}", headers=auth("admin")).status_code == 403
+    assert api.get(f"/v1/payments/{uetr}/trace", headers=auth("bank-a")).status_code == 422
+
+
+def test_each_bank_freezes_only_its_own_accounts(api, chain, ledger):
+    uetr, _, bob, carol = chain
+    body = {"attribution": "TRACED_FUNDS_FIRST", "reason": "reported scam"}
+    by_a = api.post(f"/v1/payments/{uetr}/freeze", json=body, headers=auth("bank-a")).json()
+    assert by_a["holds"] == [] and by_a["secured_cents"] == 0  # bank A holds none of the money
+
+    by_c = api.post(f"/v1/payments/{uetr}/freeze", json=body, headers=auth("bank-c")).json()
+    assert by_c["secured_cents"] == 30_000
+    assert [h["placed_by"] for h in by_c["holds"]] == ["bank-c"]
+    assert (
+        api.get(f"/v1/accounts/{carol['iban']}", headers=auth("bank-c")).json()["available_cents"]
+        == 0
+    )
+    assert (
+        api.get(f"/v1/accounts/{bob['iban']}", headers=auth("bank-b")).json()["available_cents"]
+        == 20_000
+    )
+    assert api.get("/v1/invariants", headers=auth("auditor")).json() == {"ok": True, "problems": []}
+
+
+# -- audit log ------------------------------------------------------------------------------
+
+
+def test_banks_see_only_rejections_that_involve_them(api, world):
+    alice, bob = world
+    too_much = payment(alice, bob, 1_000_000)
+    assert pacs002.parse(send(api, "bank-a", too_much).content).reason_code == "MS03"
+    assert len(api.get("/v1/audit/rejections", headers=auth("bank-a")).json()) == 1
+    assert len(api.get("/v1/audit/rejections", headers=auth("bank-b")).json()) == 1
+    assert api.get("/v1/audit/rejections", headers=auth("bank-c")).json() == []
+    assert (
+        len(api.get("/v1/audit/rejections?reason_code=MS03", headers=auth("auditor")).json()) == 1
+    )
+    assert api.get("/v1/audit/rejections", headers=auth("admin")).status_code == 403
+    assert api.get("/v1/invariants", headers=auth("bank-a")).status_code == 403
+
+
+# -- key store ------------------------------------------------------------------------------
+
+
+def test_new_keys_are_stored_only_as_hashes_in_a_private_file(tmp_path):
+    path = tmp_path / "keys.json"
+    key = add_key(path, "bank-a", Role.PSP, BANK_A)
+    assert key.startswith("ez_") and len(key) > 40
+    assert stat.S_IMODE(path.stat().st_mode) == 0o600
+    assert key not in path.read_text()
+    store = KeyStore.from_file(path)
+    assert store.authenticate(key).client_id == "bank-a"
+    assert store.authenticate(key + "x") is None
+    second = add_key(path, "auditor", Role.AUDITOR, None)
+    assert KeyStore.from_file(path).authenticate(second).role is Role.AUDITOR
+
+
+def test_unsafe_or_invalid_key_files_are_refused(tmp_path):
+    path = tmp_path / "keys.json"
+    add_key(path, "bank-a", Role.PSP, BANK_A)
+    os.chmod(path, 0o644)
+    with pytest.raises(KeyFileError, match="chmod 600"):
+        KeyStore.from_file(path)
+    with pytest.raises(KeyFileError, match="does not exist"):
+        KeyStore.from_file(tmp_path / "missing.json")
+    digest = hash_key("ez_x")
+    bad = [
+        [{"client_id": "a", "role": "psp", "key_sha256": digest}],  # psp without bic
+        [{"client_id": "a", "role": "auditor", "bic": BANK_A, "key_sha256": digest}],
+        [{"client_id": "a", "role": "root", "key_sha256": digest}],
+        [{"client_id": "a", "role": "admin", "key_sha256": "short"}],
+        [{"client_id": "a", "role": "admin", "key_sha256": digest}] * 2,
+    ]
+    for entries in bad:
+        with pytest.raises(KeyFileError):
+            KeyStore(entries)
+    with pytest.raises(KeyFileError):
+        add_key(tmp_path / "other.json", "x", Role.PSP, None)
+    assert not (tmp_path / "other.json").exists()
+
+
+def test_the_server_does_not_start_without_a_key_file(monkeypatch, tmp_path):
+    monkeypatch.delenv("ECHTZEIT_API_KEYS_FILE", raising=False)
+    with pytest.raises(RuntimeError, match="ECHTZEIT_API_KEYS_FILE"):
+        create_app_from_env()
+    path = tmp_path / "keys.json"
+    path.write_text(json.dumps([]))
+    os.chmod(path, 0o666)
+    monkeypatch.setenv("ECHTZEIT_API_KEYS_FILE", str(path))
+    monkeypatch.setenv("ECHTZEIT_DATABASE_URL", f"sqlite:///{tmp_path / 'api.db'}")
+    with pytest.raises(KeyFileError):
+        create_app_from_env()

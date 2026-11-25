@@ -31,7 +31,7 @@ class HoldInfo:
     uetr: str | None
 
 
-def _info(hold: Hold) -> HoldInfo:
+def info(hold: Hold) -> HoldInfo:
     return HoldInfo(
         id=hold.id,
         account_id=hold.account_id,
@@ -115,7 +115,7 @@ def place_hold(
     )
     session.add(hold)
     session.flush()
-    return _info(hold)
+    return info(hold)
 
 
 def freeze_available(
@@ -189,4 +189,4 @@ def active_holds(session: Session, account_id: str) -> list[HoldInfo]:
         .where(Hold.account_id == account_id, HoldRelease.hold_id.is_(None))
         .order_by(Hold.placed_after_entry_id, Hold.placed_at)
     )
-    return [_info(hold) for hold in session.scalars(statement)]
+    return [info(hold) for hold in session.scalars(statement)]

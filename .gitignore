@@ -28,3 +28,6 @@ dist/
 
 # Secrets
 .env
+
+# API key files (hashes of secrets; never commit)
+keys*.json

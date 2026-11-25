@@ -48,6 +48,7 @@ class Hop:
 class AccountTrace:
     account_id: str
     account_kind: str
+    bic: str | None  # the account's bank; None for system accounts
     depth: int  # fewest hops from the first account, among hops replayed so far
     traced_in_cents: int  # all traced money that arrived (for the first account: the payment)
     remaining_cents: int  # traced money still on the account
@@ -121,10 +122,13 @@ def freeze_traced_funds(
     reason: str,
     placed_by: str,
     max_depth: int = DEFAULT_MAX_DEPTH,
+    only_bic: str | None = None,
 ) -> FreezeResult:
     """Trace a payment and hold the traced money still on each account, in one transaction.
 
-    Money already held by an earlier freeze of the same payment is not held twice.
+    Money already held by an earlier freeze of the same payment is not held twice. With
+    `only_bic`, holds are placed only on accounts of that bank: a bank can stop money on its
+    own customers' accounts, not on other banks' accounts.
     """
     with ledger.transaction() as session:
         trace = _trace(session, uetr, attribution, max_depth)
@@ -133,6 +137,8 @@ def freeze_traced_funds(
         for node in trace.nodes():
             open_cents = node.remaining_cents - node.secured_cents
             if open_cents <= 0 or node.account_kind == SYSTEM:
+                continue
+            if only_bic is not None and node.bic != only_bic:
                 continue
             requested += open_cents
             hold = holds.freeze_available(
@@ -223,7 +229,10 @@ def _trace(session: Session, uetr: str, attribution: Attribution, max_depth: int
 
     # Every account starts with the money it had just before the payment's credit as other
     # money. The receiving account then gets the payment as traced money.
-    kinds = dict(session.execute(select(Account.id, Account.kind)).all())
+    kinds = {
+        account_id: (kind, bic)
+        for account_id, kind, bic in session.execute(select(Account.id, Account.kind, Account.bic))
+    }
     before = dict(
         session.execute(
             select(LedgerEntry.account_id, func.sum(LedgerEntry.amount_cents))
@@ -232,7 +241,8 @@ def _trace(session: Session, uetr: str, attribution: Attribution, max_depth: int
         ).all()
     )
     pools = {
-        account_id: _Pools(kind, before.get(account_id, 0)) for account_id, kind in kinds.items()
+        account_id: _Pools(kind, before.get(account_id, 0))
+        for account_id, (kind, _) in kinds.items()
     }
     accounts: list[AccountTrace] = []
     hops: list[Hop] = []
@@ -241,7 +251,9 @@ def _trace(session: Session, uetr: str, attribution: Attribution, max_depth: int
         pool = pools[account_id]
         pool.traced += cents
         if pool.node is None:
-            pool.node = AccountTrace(account_id, pool.kind, depth, 0, 0, 0, 0, 0)
+            pool.node = AccountTrace(
+                account_id, pool.kind, kinds[account_id][1], depth, 0, 0, 0, 0, 0
+            )
             accounts.append(pool.node)
         pool.node.depth = min(pool.node.depth, depth)
         pool.node.traced_in_cents += cents
