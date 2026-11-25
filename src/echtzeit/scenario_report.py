@@ -41,7 +41,7 @@ def render_spread(runs: dict[int, list[SimulationResult]]) -> list[str]:
     policies = [result.policy for result in runs[seeds[0]]]
     metrics = [
         (
-            "Lost, share of attempted",
+            "Lost after recovery along the traced path, share of attempted",
             lambda r: r.total("lost_cents") / max(1, r.total("attempted_cents")),
             "{:.1%}",
         ),
@@ -51,7 +51,7 @@ def render_spread(runs: dict[int, list[SimulationResult]]) -> list[str]:
             "{:.1%}",
         ),
         (
-            "Recovered, share of attempted",
+            "Recovered along the traced path, share of attempted",
             lambda r: r.total("recovered_cents") / max(1, r.total("attempted_cents")),
             "{:.1%}",
         ),
@@ -123,8 +123,8 @@ def render(
         [f"{len(r.cases)} ({euro(r.total('attempted_cents'))})" for r in results],
     )
     row("Prevented before payment", [euro(r.total("prevented_cents")) for r in results])
-    row("Recovered after report", [euro(r.total("recovered_cents")) for r in results])
-    row("Lost", [euro(r.total("lost_cents")) for r in results])
+    row("Recovered along the traced path", [euro(r.total("recovered_cents")) for r in results])
+    row("Lost after that recovery", [euro(r.total("lost_cents")) for r in results])
     row(
         "Warned victims who went ahead",
         [str(sum(c.warned_and_ignored for c in r.cases)) for r in results],
@@ -142,8 +142,8 @@ def render(
     row("Ledger invariants hold", ["yes" if r.invariants_ok else "NO" for r in results])
     lines += [
         "",
-        "Recovered money is what holds stopped after the victim's report, measured with the",
-        "lower-bound attribution rule (`TRACED_FUNDS_FIRST`). Normal payments refused by the bank",
+        "Recovered money is what holds stopped along the traced path after the victim's report,",
+        "measured with the lower-bound attribution rule (`TRACED_FUNDS_FIRST`). Normal payments refused by the bank",
         "are mostly payments that found too little money on the account.",
         f"Assessment time was measured on {platform.system()} {platform.machine()} with SQLite; it",
         "covers the payee-name check and the risk rules, not network or message handling.",
@@ -195,6 +195,11 @@ def render_liability(results: list[SimulationResult]) -> list[str]:
         "under each regime. Regime rules and their sources are in `echtzeit/liability.py` and",
         "[docs/design/liability.md](../design/liability.md).",
         "",
+        "Recovery reach differs by regime. `BR_MED` counts money stopped anywhere on the traced",
+        "path, because Brazil's DICT funds recovery blocks along the path. The other regimes",
+        "count only money stopped on the first receiving account, because they have no",
+        "system-wide tracing; this understates what cooperating banks may recover.",
+        "",
         "- `UK_PSR` is applied as a what-if: the real scheme covers sterling Faster Payments and",
         (
             f"  CHAPS. Cap and excess are converted at the ECB rate of {ECB_RATE_DATE} "
@@ -202,17 +207,20 @@ def render_liability(results: list[SimulationResult]) -> list[str]:
         ),
         "- `EU_PSR_PROVISIONAL` follows a provisional agreement that is not in force. The final",
         "  text may differ.",
+        "- `BR_MED` is applied as a what-if to euro payments. It returns blocked money and makes",
+        "  no bank pay for the loss.",
         "- Invoice scams hit businesses. Whether a business counts as a microenterprise is an",
         "  assumption (`microenterprise_share`).",
         "",
-        "| Policy | Regime | Paid scams | Covered | Loss | Victims | Sending banks | Receiving banks |",
-        "|---|---|---|---|---|---|---|---|",
+        "| Policy | Regime | Recovery | Paid scams | Covered | Loss | Victims | Sending banks | Receiving banks |",
+        "|---|---|---|---|---|---|---|---|---|",
     ]
     for result in results:
         for regime in REGIMES:
             t = totals(result.cases, regime, assumptions)
             lines.append(
-                f"| {result.policy.value} | {regime.code} | {t.cases} | {t.covered} | {euro(t.loss_cents)} "
+                f"| {result.policy.value} | {regime.code} | {regime.recovery.value} | {t.cases} "
+                f"| {t.covered} | {euro(t.loss_cents)} "
                 f"| {euro(t.victim_cents)} | {euro(t.sending_psp_cents)} | {euro(t.receiving_psp_cents)} |"
             )
     strict = Assumptions(ignored_warning_is_gross_negligence=True)

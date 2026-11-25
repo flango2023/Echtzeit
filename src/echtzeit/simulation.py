@@ -138,7 +138,10 @@ class CaseOutcome:
     report_delay: timedelta | None = None
     remaining_upper_cents: int = 0  # traced money still on accounts at the report, upper bound
     remaining_lower_cents: int = 0  # the same, lower bound
-    recovered_cents: int = 0  # stopped by holds after the report (lower-bound rule)
+    recovered_cents: int = 0  # stopped by holds along the traced path (lower-bound rule)
+    # The part of it stopped on the first receiving account (the first mule). Regimes without
+    # system-wide tracing are measured with this figure; see echtzeit.liability.
+    recovered_first_hop_cents: int = 0
     mule_levels: int = 0
 
     @property
@@ -668,6 +671,10 @@ class _Run:
                 placed_by="victim's bank",
             )
             case.recovered_cents = freeze.trace.secured_cents + freeze.secured_cents
+            after = trace_payment(
+                self.ledger, case.uetr, attribution=Attribution.TRACED_FUNDS_FIRST
+            )
+            case.recovered_first_hop_cents = after.root.secured_cents
 
         return run
 

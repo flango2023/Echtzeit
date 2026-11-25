@@ -12,8 +12,8 @@ evidence about real fraud, real detection rates or real recovery rates.
 |---|---|---|---|
 | Scam payments attempted | 24 (€86,272.17) | 24 (€86,237.75) | 24 (€86,237.75) |
 | Prevented before payment | €0.00 | €52,525.15 | €52,525.15 |
-| Recovered after report | €35,339.48 | €8,065.25 | €26,305.42 |
-| Lost | €50,932.69 | €25,647.35 | €7,407.18 |
+| Recovered along the traced path | €35,339.48 | €8,065.25 | €26,305.42 |
+| Lost after that recovery | €50,932.69 | €25,647.35 | €7,407.18 |
 | Warned victims who went ahead | 0 | 9 | 9 |
 | Receiving-side freezes | 0 | 0 | 7 |
 | Normal payments | 793 | 793 | 793 |
@@ -21,12 +21,12 @@ evidence about real fraud, real detection rates or real recovery rates.
 | Normal payments blocked | 0 | 0 | 0 |
 | Normal payments refused by the bank | 53 | 29 | 29 |
 | Assessment time p50 | n/a | 0.88 ms | 0.88 ms |
-| Assessment time p95 | n/a | 1.15 ms | 1.14 ms |
-| Assessment time p99 | n/a | 1.28 ms | 1.36 ms |
+| Assessment time p95 | n/a | 1.13 ms | 1.15 ms |
+| Assessment time p99 | n/a | 1.29 ms | 1.34 ms |
 | Ledger invariants hold | yes | yes | yes |
 
-Recovered money is what holds stopped after the victim's report, measured with the
-lower-bound attribution rule (`TRACED_FUNDS_FIRST`). Normal payments refused by the bank
+Recovered money is what holds stopped along the traced path after the victim's report,
+measured with the lower-bound attribution rule (`TRACED_FUNDS_FIRST`). Normal payments refused by the bank
 are mostly payments that found too little money on the account.
 Assessment time was measured on Darwin arm64 with SQLite; it
 covers the payee-name check and the risk rules, not network or message handling.
@@ -42,15 +42,16 @@ Minimum / median / maximum over the seeds, for each policy.
 
 | | NONE | SENDER_ONLY | SENDER_AND_RECEIVER |
 |---|---|---|---|
-| Lost, share of attempted | 42.7% / 59.8% / 78.4% | 14.1% / 21.8% / 37.2% | 0.0% / 7.7% / 13.5% |
+| Lost after recovery along the traced path, share of attempted | 42.7% / 59.8% / 78.4% | 14.1% / 21.8% / 37.2% | 0.0% / 7.7% / 13.5% |
 | Prevented, share of attempted | 0.0% / 0.0% / 0.0% | 51.7% / 68.3% / 81.1% | 51.7% / 68.3% / 81.1% |
-| Recovered, share of attempted | 21.6% / 40.2% / 57.3% | 1.5% / 7.4% / 20.7% | 8.6% / 22.8% / 39.6% |
+| Recovered along the traced path, share of attempted | 21.6% / 40.2% / 57.3% | 1.5% / 7.4% / 20.7% | 8.6% / 22.8% / 39.6% |
 | Normal payments warned or blocked | 0.0% / 0.0% / 0.0% | 2.9% / 5.1% / 7.2% | 2.9% / 5.1% / 7.2% |
-| Victims bear under UK_PSR, share of attempted | 2.2% / 15.7% / 23.8% | 0.4% / 4.9% / 13.0% | 0.0% / 0.4% / 3.7% |
-| Banks bear under UK_PSR, share of attempted | 34.8% / 43.1% / 76.2% | 13.6% / 16.7% / 28.2% | 0.0% / 6.2% / 13.1% |
-| Victims bear under EU_PSR_PROVISIONAL, share of attempted | 10.2% / 27.1% / 32.5% | 1.2% / 7.1% / 17.5% | 0.0% / 2.0% / 8.3% |
-| Banks bear under EU_PSR_PROVISIONAL, share of attempted | 26.5% / 34.6% / 47.4% | 11.2% / 13.8% / 25.1% | 0.0% / 5.2% / 9.4% |
-| Victims bear under NO_REFUND, share of attempted | 42.7% / 59.8% / 78.4% | 14.1% / 21.8% / 37.2% | 0.0% / 7.7% / 13.5% |
+| Victims bear under UK_PSR, share of attempted | 2.4% / 18.2% / 27.0% | 0.4% / 5.4% / 13.0% | 0.0% / 0.9% / 3.7% |
+| Banks bear under UK_PSR, share of attempted | 39.3% / 55.9% / 84.2% | 13.6% / 17.1% / 28.2% | 0.0% / 6.2% / 13.1% |
+| Victims bear under EU_PSR_PROVISIONAL, share of attempted | 24.0% / 31.3% / 37.2% | 1.2% / 7.5% / 17.5% | 0.0% / 2.4% / 8.3% |
+| Banks bear under EU_PSR_PROVISIONAL, share of attempted | 27.9% / 45.0% / 53.8% | 11.2% / 13.8% / 25.1% | 0.0% / 5.2% / 9.4% |
+| Victims bear under NO_REFUND, share of attempted | 56.6% / 74.1% / 86.6% | 14.1% / 21.8% / 37.2% | 0.0% / 7.9% / 13.5% |
+| Victims bear under BR_MED, share of attempted | 42.7% / 59.8% / 78.4% | 14.1% / 21.8% / 37.2% | 0.0% / 7.7% / 13.5% |
 
 Ledger invariants held in every run: yes.
 
@@ -148,24 +149,34 @@ victim, the victim's bank (sending PSP) and the bank of the first mule (receivin
 under each regime. Regime rules and their sources are in `echtzeit/liability.py` and
 [docs/design/liability.md](../design/liability.md).
 
+Recovery reach differs by regime. `BR_MED` counts money stopped anywhere on the traced
+path, because Brazil's DICT funds recovery blocks along the path. The other regimes
+count only money stopped on the first receiving account, because they have no
+system-wide tracing; this understates what cooperating banks may recover.
+
 - `UK_PSR` is applied as a what-if: the real scheme covers sterling Faster Payments and
   CHAPS. Cap and excess are converted at the ECB rate of 2026-11-24 (£0.83700 per €1).
 - `EU_PSR_PROVISIONAL` follows a provisional agreement that is not in force. The final
   text may differ.
+- `BR_MED` is applied as a what-if to euro payments. It returns blocked money and makes
+  no bank pay for the loss.
 - Invoice scams hit businesses. Whether a business counts as a microenterprise is an
   assumption (`microenterprise_share`).
 
-| Policy | Regime | Paid scams | Covered | Loss | Victims | Sending banks | Receiving banks |
-|---|---|---|---|---|---|---|---|
-| NONE | UK_PSR | 24 | 18 | €50,932.69 | €17,836.27 | €16,548.19 | €16,548.23 |
-| NONE | EU_PSR_PROVISIONAL | 24 | 12 | €50,932.69 | €28,029.10 | €22,903.59 | €0.00 |
-| NONE | NO_REFUND | 24 | 0 | €50,932.69 | €50,932.69 | €0.00 | €0.00 |
-| SENDER_ONLY | UK_PSR | 10 | 7 | €25,647.35 | €11,182.20 | €7,232.55 | €7,232.60 |
-| SENDER_ONLY | EU_PSR_PROVISIONAL | 10 | 4 | €25,647.35 | €15,086.89 | €10,560.46 | €0.00 |
-| SENDER_ONLY | NO_REFUND | 10 | 0 | €25,647.35 | €25,647.35 | €0.00 | €0.00 |
-| SENDER_AND_RECEIVER | UK_PSR | 10 | 7 | €7,407.18 | €3,163.00 | €2,122.08 | €2,122.10 |
-| SENDER_AND_RECEIVER | EU_PSR_PROVISIONAL | 10 | 4 | €7,407.18 | €2,924.06 | €4,483.12 | €0.00 |
-| SENDER_AND_RECEIVER | NO_REFUND | 10 | 0 | €7,407.18 | €7,407.18 | €0.00 | €0.00 |
+| Policy | Regime | Recovery | Paid scams | Covered | Loss | Victims | Sending banks | Receiving banks |
+|---|---|---|---|---|---|---|---|---|
+| NONE | UK_PSR | first receiving account only | 24 | 18 | €71,655.33 | €21,830.42 | €24,912.43 | €24,912.48 |
+| NONE | EU_PSR_PROVISIONAL | first receiving account only | 24 | 12 | €71,655.33 | €32,071.10 | €39,584.23 | €0.00 |
+| NONE | NO_REFUND | first receiving account only | 24 | 0 | €71,655.33 | €71,655.33 | €0.00 | €0.00 |
+| NONE | BR_MED | along the traced path | 24 | 0 | €50,932.69 | €50,932.69 | €0.00 | €0.00 |
+| SENDER_ONLY | UK_PSR | first receiving account only | 10 | 7 | €25,647.35 | €11,182.20 | €7,232.55 | €7,232.60 |
+| SENDER_ONLY | EU_PSR_PROVISIONAL | first receiving account only | 10 | 4 | €25,647.35 | €15,086.89 | €10,560.46 | €0.00 |
+| SENDER_ONLY | NO_REFUND | first receiving account only | 10 | 0 | €25,647.35 | €25,647.35 | €0.00 | €0.00 |
+| SENDER_ONLY | BR_MED | along the traced path | 10 | 0 | €25,647.35 | €25,647.35 | €0.00 | €0.00 |
+| SENDER_AND_RECEIVER | UK_PSR | first receiving account only | 10 | 7 | €7,407.18 | €3,163.00 | €2,122.08 | €2,122.10 |
+| SENDER_AND_RECEIVER | EU_PSR_PROVISIONAL | first receiving account only | 10 | 4 | €7,407.18 | €2,924.06 | €4,483.12 | €0.00 |
+| SENDER_AND_RECEIVER | NO_REFUND | first receiving account only | 10 | 0 | €7,407.18 | €7,407.18 | €0.00 | €0.00 |
+| SENDER_AND_RECEIVER | BR_MED | along the traced path | 10 | 0 | €7,407.18 | €7,407.18 | €0.00 | €0.00 |
 
 Sensitivity: if ignoring a bank warning were treated as gross negligence (the UK rules
 set a high bar for gross negligence, so this is a test, not a reading of the rules):

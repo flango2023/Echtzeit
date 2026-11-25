@@ -4,6 +4,7 @@ from dataclasses import replace
 import pytest
 
 from echtzeit.liability import (
+    BR_MED,
     EU_PSR_PROVISIONAL,
     NO_REFUND,
     REGIMES,
@@ -35,6 +36,8 @@ def case(**overrides) -> CaseOutcome:
         "recovered_cents": 0,
     }
     fields.update(overrides)
+    # Unless a test says otherwise, all recovered money was on the first receiving account.
+    fields.setdefault("recovered_first_hop_cents", fields["recovered_cents"])
     return CaseOutcome(**fields)
 
 
@@ -131,6 +134,19 @@ def test_no_refund_leaves_the_loss_with_the_victim():
     a = allocate(case(recovered_cents=50_000), NO_REFUND, DEFAULT)
     assert not a.covered
     assert parts(a) == (450_000, 0, 0)
+
+
+def test_br_med_returns_traced_money_and_refunds_nothing():
+    a = allocate(case(recovered_cents=300_000, recovered_first_hop_cents=100_000), BR_MED, DEFAULT)
+    assert not a.covered
+    assert parts(a) == (200_000, 0, 0)  # money recovered along the whole path counts
+
+
+def test_each_regime_uses_its_own_recovery_reach():
+    deep = case(recovered_cents=300_000, recovered_first_hop_cents=100_000)
+    for regime in (UK_PSR, EU_PSR_PROVISIONAL, NO_REFUND):
+        assert allocate(deep, regime, DEFAULT).loss_cents == 400_000  # first account only
+    assert allocate(deep, BR_MED, DEFAULT).loss_cents == 200_000  # along the traced path
 
 
 def test_sensitivity_switches_remove_the_refund():

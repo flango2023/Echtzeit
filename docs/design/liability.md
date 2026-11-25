@@ -5,20 +5,30 @@ Status: implemented in version 0.1 (`echtzeit/liability.py`). Sources checked in
 ## Question
 
 For each paid scam in the simulation, the loss is the amount paid minus the money recovered by
-holds. Who carries that loss — the victim, the victim's bank (sending PSP) or the bank that
+holds, as far as the regime's recovery reaches. Who carries that loss — the victim, the victim's bank (sending PSP) or the bank that
 holds the first mule's account (receiving PSP) — under different reimbursement regimes?
 
 ## Regimes
 
-| Rule | `UK_PSR` | `EU_PSR_PROVISIONAL` | `NO_REFUND` |
-|---|---|---|---|
-| Status | in force since 7 October 2024 | provisional agreement of 27 November 2025, not in force | baseline |
-| Victims covered | consumers, microenterprises (and charities, not simulated) | consumers | none |
-| Scams covered | all APP scams | fraud where the fraudster impersonates the consumer's PSP (the safe-account scenario) | none |
-| Cap per claim | £85,000 | none modelled | – |
-| Excess | optional, up to £100 | none | – |
-| Who pays the refund | sending and receiving PSP, 50:50 | the consumer's PSP | – |
-| Recovered money | shared by the split, PSPs keep no more than they paid, the rest to the victim | to the refunding PSP, the rest to the victim | to the victim |
+| Rule | `UK_PSR` | `EU_PSR_PROVISIONAL` | `NO_REFUND` | `BR_MED` |
+|---|---|---|---|---|
+| Status | in force since 7 October 2024 | provisional agreement of 27 November 2025, not in force | baseline | in force; funds recovery since 29 August 2025 |
+| Victims covered by a refund | consumers, microenterprises (and charities, not simulated) | consumers | none | none: MED returns blocked money, no PSP pays for the loss |
+| Scams covered | all APP scams | fraud where the fraudster impersonates the consumer's PSP (the safe-account scenario) | none | – |
+| Cap per claim | £85,000 | none modelled | – | – |
+| Excess | optional, up to £100 | none | – | – |
+| Who pays the refund | sending and receiving PSP, 50:50 | the consumer's PSP | – | – |
+| Recovery reach | first receiving account | first receiving account | first receiving account | along the traced path |
+| Recovered money | shared by the split, PSPs keep no more than they paid, the rest to the victim | to the refunding PSP, the rest to the victim | to the victim | to the victim |
+
+## Recovery reach
+
+The simulation freezes traced money along the whole path once a victim reports. That is what
+Brazil's funds recovery does, but the UK and EU rules contain no comparable system-wide
+tracing. Each case therefore records two figures: money stopped anywhere on the traced path,
+and money stopped on the first receiving account (the first mule). `BR_MED` uses the first,
+the other regimes use the second. This understates what cooperating banks may recover in the
+UK and the EU, and it is a modelling choice, not a statement about any bank.
 
 UK sources (all from the Payment Systems Regulator): the consumer page on APP fraud
 reimbursement protections (scope, start date, cap, excess, exceptions), policy statement
@@ -41,9 +51,22 @@ modelled from official summaries, and the final text may differ. Secondary sourc
 notes) report that the Council adopted its first-reading position in October 2026 and that the
 Parliament's second reading was still pending; they were not used for any rule.
 
+Brazil sources (both from the Banco Central do Brasil, read directly):
+
+- Resolução BCB nº 493 of 28 August 2025, which amends the Pix regulation. The receiving PSP
+  blocks the amount requested or, if smaller, the available balance, immediately after the
+  notification (art. 41-D). The payer's PSP starts funds recovery when there is well-founded
+  suspicion of fraud after the payer's complaint (art. 78-N). The resolution took effect on
+  publication, with one paragraph revoked from 2 February 2026 (art. 4).
+- Manual Operacional do DICT, version 8.5, section 20. The DICT builds a tracking graph from
+  the contested payment and selects the most likely path. Every prioritised receiving PSP
+  blocks at once up to the available balance, and blocks again when new money arrives.
+  Returns go in sequence to the original payer, up to the contested amount. A payment can be
+  contested for 80 days.
+
 ## Interpretation choices (this project's, not the regulators')
 
-- The UK regime is applied as a what-if to simulated euro payments. The sterling cap and excess
+- The UK and Brazilian regimes are applied as what-ifs to simulated euro payments. The sterling cap and excess
   are converted at the ECB reference rate of 24 November 2026 (£0.83700 per €1).
 - An invoice whose IBAN was changed is treated as an authorised payment under the EU text, not
   as a transaction the fraudster initiated or changed, so the EU impersonation refund does not
@@ -67,8 +90,9 @@ Parliament's second reading was still pending; they were not used for any rule.
 Claim deadlines and time limits for reimbursement (the simulated victims report within days),
 vulnerability assessments, first-party fraud, the "stop the clock" mechanism, liability for
 failing to offer Verification of Payee (the simulation always runs it) and any regime outside
-the three above. Brazil's MED is planned for a later version, after its rules are read from
-the Banco Central texts.
+the four above. For `BR_MED`: re-blocking when new money reaches a blocked account, the
+DICT's own prioritisation algorithm (the simulation's trace is used instead) and the analysis
+step in which a receiving PSP may reject a notification.
 
 ## What the results can show
 

@@ -107,7 +107,7 @@ def test_the_report_prints_the_numbers_of_the_run(results):
     text = render(ordered, spread={1: ordered})
 
     lost = " | ".join(euro(r.total("lost_cents")) for r in ordered)
-    assert f"| Lost | {lost} |" in text
+    assert f"| Lost after that recovery | {lost} |" in text
     assert "## Spread over seeds 1–1" in text
     assert "Ledger invariants held in every run: yes." in text
     for case in ordered[0].cases:
@@ -127,15 +127,23 @@ def test_the_receiving_side_freeze_changes_the_outcome(results):
 
 
 def test_who_pays_shares_exactly_the_simulated_losses(results):
-    from echtzeit.liability import REGIMES, Assumptions, totals
+    from echtzeit.liability import REGIMES, Assumptions, Recovery, totals
     from echtzeit.scenario_report import render
 
     for result in results.values():
-        lost = result.total("lost_cents")
+        paid = [c for c in result.cases if c.executed]
         for regime in REGIMES:
             t = totals(result.cases, regime, Assumptions())
-            assert t.loss_cents == lost
-            assert t.victim_cents + t.sending_psp_cents + t.receiving_psp_cents == lost
+            reach = (
+                "recovered_cents"
+                if regime.recovery is Recovery.TRACING
+                else "recovered_first_hop_cents"
+            )
+            expected = sum(c.attempted_cents - getattr(c, reach) for c in paid)
+            assert t.loss_cents == expected
+            assert t.victim_cents + t.sending_psp_cents + t.receiving_psp_cents == expected
+        for c in paid:
+            assert 0 <= c.recovered_first_hop_cents <= c.recovered_cents
     text = render([results[policy] for policy in Policy])
     assert "## Who pays" in text and "| NONE | UK_PSR |" in text
 

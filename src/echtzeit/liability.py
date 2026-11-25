@@ -16,6 +16,12 @@ Regimes in version 1:
   (27 November 2025). Not adopted and not in force when checked; the final text may differ.
 * NO_REFUND: no reimbursement rule. The victim bears the loss. This stands in for markets
   without a refund rule.
+* BR_MED: Brazil's Pix Special Return Mechanism with funds recovery (Resolução BCB 493/2025
+  and the DICT Operational Manual). It returns money blocked along the traced path and makes
+  no PSP pay for the loss. Applied as a what-if to euro payments.
+
+Recovery reach: BR_MED counts money stopped anywhere on the traced path. The other regimes
+have no system-wide tracing, so they count only money stopped on the first receiving account.
 
 Not modelled: claim deadlines and reimbursement time limits (the simulated victims report
 within days, well inside them), vulnerability assessments, first-party fraud, the EU rules
@@ -34,6 +40,13 @@ class VictimType(Enum):
     CONSUMER = "CONSUMER"
     MICROENTERPRISE = "MICROENTERPRISE"
     OTHER_BUSINESS = "OTHER_BUSINESS"
+
+
+class Recovery(Enum):
+    """How far recovery reaches once the victim reports the scam."""
+
+    FIRST_HOP = "first receiving account only"
+    TRACING = "along the traced path"
 
 
 class Status(Enum):
@@ -79,6 +92,7 @@ class Regime:
     # When the sending PSP does not deduct the excess, the receiving PSP may lower its own
     # contribution by this amount (UK: 50% of the maximum excess).
     receiving_deduction_without_excess_cents: int
+    recovery: Recovery
     sources: tuple[Source, ...]
     notes: tuple[str, ...] = ()
 
@@ -95,6 +109,7 @@ UK_PSR = Regime(
     max_excess_cents=gbp_pence_to_eur_cents(10_000),  # £100
     receiving_share=Decimal("0.5"),
     receiving_deduction_without_excess_cents=gbp_pence_to_eur_cents(5_000),  # £50
+    recovery=Recovery.FIRST_HOP,
     sources=(
         Source(
             "PSR, APP fraud reimbursement protections (consumer page)",
@@ -143,6 +158,7 @@ EU_PSR_PROVISIONAL = Regime(
     max_excess_cents=0,
     receiving_share=Decimal(0),
     receiving_deduction_without_excess_cents=0,
+    recovery=Recovery.FIRST_HOP,
     sources=(
         Source(
             "Council of the EU, press release of 27 November 2025 on the payment services deal",
@@ -189,11 +205,55 @@ NO_REFUND = Regime(
     max_excess_cents=0,
     receiving_share=Decimal(0),
     receiving_deduction_without_excess_cents=0,
+    recovery=Recovery.FIRST_HOP,
     sources=(),
     notes=("The victim bears every loss that is not recovered.",),
 )
 
-REGIMES = (UK_PSR, EU_PSR_PROVISIONAL, NO_REFUND)
+BR_MED = Regime(
+    code="BR_MED",
+    name="Brazil Pix Special Return Mechanism (MED) with funds recovery",
+    status=Status.IN_FORCE,
+    covered_victims=frozenset(),  # MED returns blocked money; no PSP refunds the loss
+    covered_kinds=frozenset(),
+    cap_cents=None,
+    max_excess_cents=0,
+    receiving_share=Decimal(0),
+    receiving_deduction_without_excess_cents=0,
+    recovery=Recovery.TRACING,
+    sources=(
+        Source(
+            "Banco Central do Brasil, Resolução BCB nº 493, de 28 de agosto de 2025",
+            "https://www.bcb.gov.br/estabilidadefinanceira/exibenormativo?tipo=Resolu%C3%A7%C3%A3o%20BCB&numero=493",
+            True,
+            "receiving PSP blocks the requested amount or the available balance (art. 41-D); "
+            "funds recovery started by the payer's PSP on well-founded suspicion of fraud after "
+            "the payer's complaint (art. 78-N); in effect on publication, 29 August 2025, with "
+            "one paragraph revoked from 2 February 2026 (art. 4)",
+        ),
+        Source(
+            "Banco Central do Brasil, Manual Operacional do DICT, version 8.5, section 20",
+            "https://www.bcb.gov.br/content/estabilidadefinanceira/pix/Regulamento_Pix/X_ManualOperacionaldoDICT.pdf",
+            True,
+            "tracking graph from the contested payment; immediate blocks up to the available "
+            "balance at every prioritised receiving PSP; returns in sequence to the original "
+            "payer up to the contested amount; 80 days to contest",
+        ),
+    ),
+    notes=(
+        (
+            "Applied as a what-if to simulated euro payments. MED recovers money along the path; "
+            "it does not make any PSP pay for the loss."
+        ),
+        (
+            "Not modelled: re-blocking when new money reaches a blocked account, the DICT's own "
+            "prioritisation algorithm (the simulation's trace is used instead) and the analysis "
+            "step in which a receiving PSP may reject a notification."
+        ),
+    ),
+)
+
+REGIMES = (UK_PSR, EU_PSR_PROVISIONAL, NO_REFUND, BR_MED)
 
 
 @dataclass(frozen=True)
@@ -243,7 +303,11 @@ def allocate(case: CaseOutcome, regime: Regime, assumptions: Assumptions) -> All
     if not case.executed:
         return None
     paid = case.attempted_cents
-    recovered = case.recovered_cents
+    recovered = (
+        case.recovered_cents
+        if regime.recovery is Recovery.TRACING
+        else case.recovered_first_hop_cents
+    )
     loss = paid - recovered
     victim_type = VictimType(case.victim_type)
 
