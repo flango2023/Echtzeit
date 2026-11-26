@@ -171,3 +171,30 @@ def test_full_chain_screens_incoming_payments(results):
     assert [c.decision for c in full.cases] == [
         c.decision for c in results[Policy.SENDER_AND_RECEIVER].cases
     ]
+
+
+def test_held_back_cases_match_the_receiving_banks_rejections(tmp_path):
+    """A case counts as held back only if the audit log has the RR04 refusal of that payment.
+
+    Seed 7 has a blocked payment right after a held-back one, which is the order that once made
+    a payment that was never sent inherit the previous payment's outcome.
+    """
+    import sqlite3
+
+    from echtzeit.payments import HELD_BACK
+
+    path = tmp_path / "full.db"
+    result = simulate(Policy.FULL_CHAIN, ScenarioConfig(seed=7), db_url=f"sqlite:///{path}")
+    with sqlite3.connect(path) as db:
+        iban = dict(db.execute("SELECT id, iban FROM accounts"))
+        refused = set(
+            db.execute(
+                "SELECT debtor_iban, amount_cents FROM rejected_payments WHERE reason_code = ?",
+                (HELD_BACK,),
+            )
+        )
+    assert any(c.held_back for c in result.cases)
+    for case in result.cases:
+        sent = case.decision in (None, "ALLOW") or case.warned_and_ignored
+        in_log = (iban[case.victim_id], case.attempted_cents) in refused
+        assert case.held_back == (sent and in_log), case.case_id

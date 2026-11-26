@@ -317,6 +317,9 @@ class _Run:
     ) -> tuple[Assessment | None, str | None, bool]:
         """Score and send one payment. Returns the assessment, the UETR if it was made, and
         whether a warning was shown and ignored."""
+        # Reset first: a payment that is blocked or declined never reaches the processor, and
+        # must not inherit the reason code of the payment before it.
+        self.last_reason = None
         assessment = None
         ignored_warning = False
         if self.policy is not Policy.NONE and self.measured(self.now):

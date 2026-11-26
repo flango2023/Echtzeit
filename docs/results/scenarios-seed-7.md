@@ -16,15 +16,15 @@ evidence about real fraud, real detection rates or real recovery rates.
 | Lost after that recovery | €62,732.37 | €22,900.51 | €5,975.09 | €24.29 |
 | Warned victims who went ahead | 0 | 8 | 8 | 8 |
 | Receiving-side freezes | 0 | 0 | 6 | 1 |
-| Scam payments held back by the receiving bank | 0 | 0 | 0 | 8 |
+| Scam payments held back by the receiving bank | 0 | 0 | 0 | 7 |
 | Normal payments | 799 | 799 | 799 | 799 |
 | Normal payments warned | 0 (0.0%) | 59 (7.4%) | 59 (7.4%) | 59 (7.4%) |
 | Normal payments blocked | 0 | 0 | 0 | 0 |
 | Normal payments held back by the receiving bank | 0 | 0 | 0 | 6 |
 | Normal payments refused by the bank | 38 | 23 | 23 | 21 |
-| Assessment time p50 | n/a | 0.88 ms | 0.88 ms | 0.88 ms |
-| Assessment time p95 | n/a | 1.13 ms | 1.13 ms | 1.13 ms |
-| Assessment time p99 | n/a | 1.28 ms | 1.31 ms | 1.32 ms |
+| Assessment time p50 | n/a | 0.88 ms | 0.89 ms | 0.88 ms |
+| Assessment time p95 | n/a | 1.16 ms | 1.17 ms | 1.16 ms |
+| Assessment time p99 | n/a | 1.33 ms | 1.31 ms | 1.35 ms |
 | Ledger invariants hold | yes | yes | yes | yes |
 
 Recovered money is what holds stopped along the traced path after the victim's report,
