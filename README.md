@@ -22,10 +22,17 @@ code, and no number in it is typed by hand. Over the ten seeds (minimum / median
 | Victims' share under the UK rules | 2.4% / 18.2% / 27.0% | 0.4% / 5.4% / 13.0% | 0.0% / 0.9% / 3.7% |
 | Victims' share with no refund rule | 56.6% / 74.1% / 86.6% | 14.1% / 21.8% / 37.2% | 0.0% / 7.9% / 13.5% |
 | Victims' share under Brazil's MED | 42.7% / 59.8% / 78.4% | 14.1% / 21.8% / 37.2% | 0.0% / 7.7% / 13.5% |
+| Victims' share under the EU Council text | 0% | 0% | 0% |
 
 The UK rules move most of the loss to the banks. Brazil's MED makes no bank pay, but when
 nothing is scored its recovery along the traced path leaves victims with a smaller share than
 the no-refund baseline, which recovers only from the first receiving account.
+
+Under the EU Payment Services Regulation as the Council adopted it at first reading (not in
+force), the victim's bank carries every loss here. Its art. 87(3) requires both banks to
+monitor a payment, the receiving bank before it credits the money. No simulated policy has
+the receiving bank screen incoming payments. A sensitivity check in the results file applies
+the EU rules as if it did.
 
 These numbers are not evidence about real fraud. The same author wrote the scenarios and the
 risk rules, so the results are circular by construction. Every probability, delay and amount
@@ -43,7 +50,7 @@ is an assumption, and the results file lists all of them.
 | `vop`, `risk` | Verification of Payee with the four EPC outcomes, and a rule-based risk score that lists every rule that fired. | [scenarios-and-scoring.md](docs/design/scenarios-and-scoring.md) |
 | `simulation`, `scenario_report` | A seeded synthetic population with normal payments and three scam patterns from the EPC fraud report. Three policies compared on the same world. | [scenarios-and-scoring.md](docs/design/scenarios-and-scoring.md) |
 | `liability` | Shares each loss between the victim, the sending bank and the receiving bank under the UK rules, the provisional EU rules, Brazil's MED and a no-refund baseline. | [liability.md](docs/design/liability.md) |
-| `api` | HTTP API with API keys, roles (bank, auditor, admin), per-bank authorization, rate limits and size limits. | [threat-model.md](docs/design/threat-model.md) |
+| `api` | HTTP API with expiring API keys, roles (bank, auditor, admin), per-bank authorization, rate and size limits, a per-client request log and a launcher that requires TLS off localhost. | [threat-model.md](docs/design/threat-model.md) |
 
 ### Ledger
 
@@ -88,6 +95,7 @@ Every endpoint except `GET /v1/health` needs `Authorization: Bearer <key>`.
 | `POST /v1/accounts/{iban}/holds`, `POST /v1/holds/{id}/release` | the account's bank |
 | `GET /v1/accounts/{iban}/holds` | the account's bank, auditor |
 | `GET /v1/audit/rejections` | auditor (all), banks (only rejections that involve them) |
+| `GET /v1/audit/requests` | auditor |
 | `GET /v1/invariants` | auditor, admin |
 
 - A bank's request for another bank's account gets the same "not found" answer as an IBAN
@@ -95,6 +103,10 @@ Every endpoint except `GET /v1/health` needs `Authorization: Bearer <key>`.
 - Traces show other banks' accounts only as BIC and amounts.
 - Who placed or released a hold is taken from the key, never from the request.
 - Errors use RFC 9457 problem details and never include internals or submitted values.
+- Keys expire (90 days by default). Rotation means creating a second key for the same client
+  and revoking the old one. The server picks up a changed key file without a restart.
+- Every call except the health check is recorded with client, key id, route template, status
+  and duration. Bodies, keys and IBANs are not recorded.
 
 ## Limits
 
@@ -147,19 +159,21 @@ Scenarios, scoring and liability:
 - Cash withdrawals are not scored, because they are not instant credit transfers.
 - Assessment times come from one machine with SQLite and exclude network and messaging.
 - The UK and Brazilian regimes are applied as what-ifs to euro payments, the UK one at a fixed
-  ECB exchange rate. The EU regime follows a provisional agreement modelled from official
-  summaries, because the legal text could not be read here. Only `BR_MED` counts recovery
-  along the traced path. The other regimes count only the first receiving account, which
+  ECB exchange rate. The EU regime follows the Council's position at first reading, which is
+  not in force and may still change. Its "objectively justified reasons to suspect fraud" are
+  not defined in numbers, so mapping them to risk rules is this project's interpretation.
+  Only `BR_MED` counts recovery along the traced path. The other regimes count only the first receiving account, which
   understates what cooperating banks may recover. Claim deadlines, vulnerability assessments
   and several other rules are not modelled. The list is in
   [liability.md](docs/design/liability.md).
 
 HTTP API:
 
-- There is no TLS, so run it on 127.0.0.1 only. Keys never expire and are rotated by editing
-  the key file and restarting.
+- TLS needs a certificate you provide. The minimum TLS 1.2 comes from Python's defaults,
+  checked on 25 November 2026, and is not set by the code.
 - Rate limits are in memory and cover one server process.
-- API calls other than holds and payment rejections are not logged per client.
+- The request log is written after each response. If that write fails, the server log
+  reports it, but the call is not refused.
 - The full list, with the test behind each mitigation, is in
   [threat-model.md](docs/design/threat-model.md).
 
@@ -181,19 +195,38 @@ Run the API locally:
 ```bash
 python -m echtzeit.api.auth new --client admin --role admin --keys keys.json
 python -m echtzeit.api.auth new --client bank-a --role psp --bic ECHTDEFF --keys keys.json
-ECHTZEIT_DATABASE_URL=sqlite:///echtzeit.db ECHTZEIT_API_KEYS_FILE=keys.json \
-  uvicorn --factory echtzeit.api.app:create_app_from_env --host 127.0.0.1 --port 8000
+python -m echtzeit.api.serve --keys keys.json --db sqlite:///echtzeit.db
 ```
 
-Each `new` command prints its key once. `keys.json` stores only hashes, is created with mode
-600 and must stay out of version control. The server refuses to start without it, or if other
-users can read it.
+Each `new` command prints its key once on standard output and its key id on standard error.
+`keys.json` stores only hashes, is created with mode 600 and must stay out of version control.
+The server refuses to start without it, or if other users can read it. To rotate, create a
+new key for the same client, switch over, then remove the old one:
 
-On macOS with Python 3.13 or later, `import echtzeit` can fail after `pip install -e .`. In
-this project the editable-install `.pth` file in `.venv/lib/python3.*/site-packages` was found
-with the hidden flag set, and Python skips hidden `.pth` files. Run
-`chflags nohidden .venv/lib/python3.*/site-packages/__editable__.echtzeit-*.pth`. The tests do
-not depend on it, because `pyproject.toml` sets the pytest `pythonpath`.
+```bash
+python -m echtzeit.api.auth list --keys keys.json
+python -m echtzeit.api.auth revoke --key-id <key id> --keys keys.json
+```
+
+The launcher listens on 127.0.0.1:8000. To listen on another address it requires
+`--tls-cert` and `--tls-key`, and the key file must be readable only by its owner.
+
+### macOS with iCloud Drive
+
+If Desktop and Documents sync to iCloud Drive, iCloud sets the hidden flag on files inside
+dot-folders such as `.venv`, within about a minute. Python 3.13 and later skip hidden `.pth`
+files, so `import echtzeit` stops working after `pip install -e .`. This was reproduced here:
+files in `.venv` became hidden, files in the project root and outside iCloud did not, and
+files in a folder ending in `.nosync`, which iCloud does not sync, stayed visible. Keep the
+environment in a `.nosync` folder and link `.venv` to it:
+
+```bash
+python -m venv .venv.nosync
+ln -s .venv.nosync .venv
+```
+
+Both names are in `.gitignore`. The tests run either way, because `pyproject.toml` sets the
+pytest `pythonpath`.
 
 ## Security
 
@@ -215,8 +248,9 @@ Checked:
 
 Not done yet:
 
-- There is no TLS, no key expiry or rotation, and no per-client request log.
-- There is no database encryption and no retention period.
+- Certificates, key storage outside a file and multi-process rate limits are left to the
+  deployment.
+- There is no database encryption and no retention period for the audit and request logs.
 - Message-level protection such as signing is not implemented.
 
 Do not expose this code to a network or use it with real money or real customer data.
@@ -251,9 +285,9 @@ code from them is copied into the repository.
 - Payment Systems Regulator: the consumer page on APP fraud reimbursement protections, policy
   statement PS24/7, the APP scams overview and the policy clarifications page, for the UK
   regime.
-- Council of the EU press release of 27 November 2025, European Parliament press release
-  20251121IPR31540 (through search-result excerpts) and the Parliament's answer E-000069/26,
-  for the provisional EU regime and the receiving-PSP freeze.
+- Council of the EU: position at first reading on the Payment Services Regulation (document
+  8543/26, 21 October 2026), the final compromise text (8221/26) and the press release of 27
+  November 2025, for the EU regime (art. 27, 50, 60, 68, 73 and 87).
 - ECB euro foreign exchange reference rate GBP/EUR of 24 November 2026, for converting the UK
   cap and excess.
 - Banco Central do Brasil: Resolução BCB nº 493 of 28 August 2025 and the Manual Operacional

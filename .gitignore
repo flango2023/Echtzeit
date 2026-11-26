@@ -4,8 +4,10 @@ Pulso.code-workspace
 # macOS
 .DS_Store
 
-# Python
-.venv/
+# Python. `.venv` may be a symlink to `.venv.nosync` (see the README), so both are listed
+# without a trailing slash, which would not match a symlink.
+.venv
+.venv.nosync
 __pycache__/
 *.pyc
 *.egg-info/
