@@ -1,6 +1,6 @@
 # Threat model
 
-Status: version 0.1, November 2026. It covers the HTTP API (`echtzeit.api`), the key file, the
+Status: version 0.1, November 2026. It covers the HTTP API (`echtzeit.api`), the key files, the
 database and payment-message input. All money and data in Echtzeit are fictional. This model
 describes what would matter if the same design held real data, and states which mitigations
 exist in the code today.
@@ -25,7 +25,7 @@ exist in the code today.
 - **Local operating-system users and database administrators**: they are outside the API's
   control.
 
-Trust boundaries: the network to the API, the API to the database, and the key file on disk.
+Trust boundaries: the network to the API, the API to the database, and the key files on disk.
 
 ## Threats and mitigations
 
@@ -46,6 +46,7 @@ nothing in the code addresses the threat yet.
 | Threat | Mitigation | Evidence |
 |---|---|---|
 | Editing or deleting ledger rows, holds or the audit log | Database triggers make those tables append-only. | `test_ledger_entries_and_transfers_are_append_only`, `test_holds_and_releases_are_append_only`, `test_audit_rows_cannot_be_changed_or_deleted` |
+| Deleting recent log rows under the cover of retention | Only `rejected_payments` and `api_requests` can be purged. A trigger refuses to delete any row younger than the table's retention period, and every delete when no period is set. A period is at least 30 days, checked by the code and by the database. Each purge leaves an append-only record in `retention_runs`. | `test_without_a_policy_nothing_is_deleted_even_by_hand`, `test_the_trigger_refuses_recent_rows_even_with_a_policy`, `test_logs_stay_unchangeable_and_the_money_record_is_never_purged`, `test_policies_below_the_minimum_or_for_other_tables_are_refused` |
 | A database administrator drops the triggers | Not mitigated: there is no tamper-evident chaining. `verify_invariants` finds balances that disagree with the ledger, but not rewritten history that is consistent. | `test_verify_invariants_detects_a_tampered_balance` (partial) |
 | A bank holds or releases money on another bank's account | Holds, releases and freezes act only on the caller's own accounts. | `test_holds_are_placed_and_released_by_the_account_bank_only`, `test_each_bank_freezes_only_its_own_accounts` |
 | Setting fields the client should not control (`placed_by`, account kind) | Request bodies refuse unknown fields. `placed_by` comes from the key. | `test_who_placed_a_hold_cannot_be_spoofed`, `test_invalid_input_is_refused_without_echoing_it` |
@@ -71,7 +72,9 @@ nothing in the code addresses the threat yet.
 | Error messages leaking internals or echoing input | Unexpected errors return a generic 500. Validation errors name the field, not the value. | `test_unexpected_errors_do_not_leak_details`, `test_invalid_input_is_refused_without_echoing_it` |
 | The key file read by another local user | Keys are stored only as hashes. The server refuses to start if the file is readable by group or others. Files are written with mode 600, and replaced atomically so the server never reads half a file. | `test_new_keys_are_stored_only_as_hashes_in_a_private_file`, `test_unsafe_or_invalid_key_files_are_refused` |
 | Responses cached by intermediaries | `Cache-Control: no-store` on every response. | `test_health_needs_no_key_and_carries_safety_headers` |
-| Personal data at rest | Not mitigated: the database is not encrypted, and there is no retention period. | – |
+| Personal data in a copied database file (backup, lost disk) | With a key file, the database is opened through SQLCipher 4 (`sqlcipher3`), which encrypts every page with AES-256 and checks an HMAC-SHA512 on each page when it is read, including pages in the write-ahead log ([SQLCipher design](https://www.zetetic.net/sqlcipher/design/)). The key is a 256-bit raw key, so no password derivation is involved. A wrong key is refused at connect time. Temporary data is kept in memory, because SQLCipher's design notes assume file-based temporary storage is switched off; the code sets this, and the `sqlcipher3` 0.6.5 build used here already defaults to it. The launcher refuses a non-loopback address without a database key. Not covered: data in the memory of the running process, exports an operator makes, and databases opened without a key, which stay plain SQLite. | `test_the_ledger_works_on_an_encrypted_file_and_nothing_is_readable_on_disk`, `test_a_wrong_key_or_no_key_cannot_open_an_encrypted_file`, `test_the_launcher_refuses_unsafe_settings` |
+| The database key read by another local user or leaked | The key lives only in a file, never in the URL, an environment value or a log. The file must have mode 600, checked by the API, the launcher and the retention tool; new key files are created with mode 600 and never overwrite an existing one. Not mitigated: there is no key rotation (SQLCipher's `PRAGMA rekey` is not wired in), and losing the key file loses the database. | `test_a_new_key_file_is_private_random_and_never_overwritten`, `test_key_files_that_are_open_missing_or_malformed_are_refused`, `test_only_hex_keys_reach_the_pragma` |
+| Personal data kept longer than needed | The GDPR's storage-limitation principle ([Regulation (EU) 2016/679](https://eur-lex.europa.eu/eli/reg/2016/679/oj), art. 5(1)(e)) asks that personal data be kept identifiable no longer than its purpose requires. An operator sets a period per log table and runs `python -m echtzeit.retention purge`. There are no default periods, because the right one depends on the purpose and on legal duties; without a period nothing is deleted. Not mitigated: purges do not run on a schedule, and the ledger, transfers and holds, which also contain IBANs and names, are never purged. | `test_a_purge_deletes_only_rows_older_than_the_period`, `test_rejected_payments_follow_their_own_policy` |
 | Data in transit | The launcher (`python -m echtzeit.api.serve`) refuses to listen on a non-loopback address without a TLS certificate and key, and refuses a key file others can read. Over HTTPS every response carries `Strict-Transport-Security`. The minimum protocol version (TLS 1.2) comes from Python's default server context: on 25 November 2026, with Python 3.14 and OpenSSL 3.6.4, the context uvicorn builds had `minimum_version` TLSv1_2. The code does not set it. | `test_the_launcher_refuses_unsafe_settings`, `test_hsts_is_sent_only_over_https`; HTTPS checked by hand with a self-signed certificate |
 | The request log exposing personal data | The log stores route templates such as `/v1/accounts/{iban}`, not the IBAN. It never stores bodies or keys. The source address is kept only for failed authentication. | `test_every_call_is_logged_without_bodies_keys_or_path_values` |
 
@@ -93,7 +96,8 @@ nothing in the code addresses the threat yet.
 
 ## Supply chain
 
-`pip-audit` and `bandit` ran clean on 25 November 2026, and CI runs both on every push.
+`pip-audit` and `bandit` ran clean on 25 November 2026, and again on 26 November 2026 after
+`sqlcipher3` was added; CI runs both on every push.
 Dependencies have lower bounds but no lock file, so a fresh install may pull newer versions
 than the ones checked.
 

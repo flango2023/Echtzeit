@@ -19,8 +19,11 @@ api = [
     "fastapi>=0.115",
     "uvicorn>=0.30",
 ]
+encryption = [
+    "sqlcipher3>=0.6",
+]
 dev = [
-    "echtzeit[api]",
+    "echtzeit[api,encryption]",
     "pytest>=8",
     "ruff>=0.5",
     "lxml>=5",

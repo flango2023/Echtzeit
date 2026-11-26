@@ -24,6 +24,12 @@ jobs:
       - run: ruff check .
       - run: ruff format --check .
       - run: pytest
+      # The encryption tests skip without sqlcipher3, so prove it is installed, then run every
+      # ledger test again on an encrypted database.
+      - run: python -c "import sqlcipher3"
+      - run: pytest
+        env:
+          ECHTZEIT_TEST_ENCRYPTED: "1"
 
   security:
     runs-on: ubuntu-latest

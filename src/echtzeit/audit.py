@@ -3,8 +3,10 @@
 Accepted payments are already recorded by the ledger (transfers and ledger entries). This
 module records the refusals, which the ledger never sees.
 
-Privacy: rows hold IBANs and amounts. Here they are fictional. A real deployment would need
-a retention period and access control for this table, and neither is implemented.
+Privacy: rows hold IBANs and amounts. Here they are fictional. Through the HTTP API only
+auditors read every row, and banks see only rows that involve them. Rows can be purged after a
+period the operator sets (`echtzeit.retention`), and the database can be encrypted at rest
+(`echtzeit.db`).
 """
 
 from collections import Counter
@@ -47,7 +49,7 @@ class AuditLog:
         with self._sessions.begin() as session:
             session.add(
                 RejectedPayment(
-                    recorded_at=recorded_at,
+                    recorded_at=to_db_time(recorded_at),
                     msg_id=message.msg_id,
                     tx_id=message.tx_id,
                     uetr=message.uetr,

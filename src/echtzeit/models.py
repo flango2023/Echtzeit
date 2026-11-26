@@ -181,7 +181,57 @@ class ApiRequest(Base):
     source: Mapped[str | None] = mapped_column(String(64), nullable=True)
 
 
-# Append-only enforcement. Corrections must be new transfers, never edits.
+# Logs that hold personal data and may be purged after a retention period, with the column
+# that dates each row. Nothing else is ever deleted: the ledger, transfers and holds are the
+# money record.
+RETENTION_COLUMNS = {"rejected_payments": "recorded_at", "api_requests": "at"}
+
+# Shortest retention a policy may set, in days. A project choice: a typing mistake must not be
+# able to wipe last week's evidence.
+MIN_KEEP_DAYS = 30
+
+
+class RetentionPolicy(Base):
+    """How many days rows of one log table are kept. No row means: keep forever (fail closed)."""
+
+    __tablename__ = "retention_policy"
+    __table_args__ = (
+        CheckConstraint(
+            "table_name IN (" + ", ".join(f"'{t}'" for t in RETENTION_COLUMNS) + ")",
+            name="retention_table_known",
+        ),
+        CheckConstraint(f"keep_days >= {MIN_KEEP_DAYS}", name="retention_minimum"),
+    )
+
+    table_name: Mapped[str] = mapped_column(String(40), primary_key=True)
+    keep_days: Mapped[int] = mapped_column(Integer)
+    set_at: Mapped[datetime] = mapped_column(DateTime)
+
+
+class RetentionRun(Base):
+    """One purge of one table: when, under which policy, how many rows went. Append-only."""
+
+    __tablename__ = "retention_runs"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    ran_at: Mapped[datetime] = mapped_column(DateTime)
+    table_name: Mapped[str] = mapped_column(String(40))
+    keep_days: Mapped[int] = mapped_column(Integer)
+    cutoff: Mapped[datetime] = mapped_column(DateTime)
+    deleted_rows: Mapped[int] = mapped_column(Integer)
+
+
+def _block(table: str, op: str, when: str = "", message: str | None = None) -> DDL:
+    message = message or f"{table} is append-only"
+    return DDL(
+        f"CREATE TRIGGER IF NOT EXISTS {table}_no_{op.lower()} "
+        f"BEFORE {op} ON {table} {when}"
+        f"BEGIN SELECT RAISE(ABORT, '{message}'); END"
+    ).execute_if(dialect="sqlite")
+
+
+# Append-only enforcement. Corrections must be new transfers, never edits. The table and column
+# names below are constants of this module, never user input.
 for _table in (
     "ledger_entries",
     "transfers",
@@ -189,13 +239,26 @@ for _table in (
     "holds",
     "hold_releases",
     "api_requests",
+    "retention_runs",
 ):
     for _op in ("UPDATE", "DELETE"):
-        _ddl = DDL(
-            f"CREATE TRIGGER IF NOT EXISTS {_table}_no_{_op.lower()} "
-            f"BEFORE {_op} ON {_table} "
-            f"BEGIN SELECT RAISE(ABORT, '{_table} is append-only'); END"
-        ).execute_if(dialect="sqlite")
+        if _op == "DELETE" and _table in RETENTION_COLUMNS:
+            # A row may only be deleted once it is older than the table's retention period.
+            # Without a policy the cutoff falls back to year 0, so no row is old enough and
+            # every delete is refused. A row without a timestamp is never deleted.
+            _column = RETENTION_COLUMNS[_table]
+            _ddl = _block(
+                _table,
+                _op,
+                when=(
+                    f"WHEN OLD.{_column} IS NULL OR OLD.{_column} >= COALESCE((SELECT "  # nosec B608
+                    f"datetime('now', '-' || keep_days || ' days') FROM retention_policy "
+                    f"WHERE table_name = '{_table}'), '0000-01-01') "
+                ),
+                message=f"{_table} rows are kept until their retention period ends",
+            )
+        else:
+            _ddl = _block(_table, _op)
         event.listen(Base.metadata.tables[_table], "after_create", _ddl)
 
 

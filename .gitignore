@@ -33,3 +33,5 @@ dist/
 
 # API key files (hashes of secrets; never commit)
 keys*.json
+# Database encryption keys (never commit)
+*.key

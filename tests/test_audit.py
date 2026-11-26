@@ -106,7 +106,11 @@ def test_audit_rows_cannot_be_changed_or_deleted(processor, audit, engine, custo
         "UPDATE rejected_payments SET reason_code = 'XXXX'",
         "DELETE FROM rejected_payments",
     ):
-        with pytest.raises(DatabaseError, match="append-only"), engine.begin() as conn:
+        # Updates are always refused; deletes until the retention period ends (none is set).
+        with (
+            pytest.raises(DatabaseError, match="append-only|retention period ends"),
+            engine.begin() as conn,
+        ):
             conn.execute(text(statement))
 
     assert len(audit.rejections()) == 1

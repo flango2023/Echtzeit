@@ -40,6 +40,7 @@ from echtzeit.api.auth import Client, KeyStore, Role
 from echtzeit.api.ratelimit import RateLimiter
 from echtzeit.audit import AuditLog
 from echtzeit.db import make_engine, make_session_factory
+from echtzeit.dbkey import load_key_file
 from echtzeit.errors import (
     AccountNotFound,
     IdempotencyConflict,
@@ -580,7 +581,9 @@ def create_app_from_env() -> FastAPI:
     if not keys_file:
         raise RuntimeError("set ECHTZEIT_API_KEYS_FILE to a key file (see echtzeit.api.auth)")
     keys = KeyStore.from_file(keys_file)
-    engine = make_engine(url)
+    db_key_file = os.environ.get("ECHTZEIT_DB_KEY_FILE")
+    db_key = load_key_file(db_key_file) if db_key_file else None
+    engine = make_engine(url, key=db_key)
     init_db(engine)
     sessions = make_session_factory(engine)
     return create_app(Ledger(sessions), AuditLog(sessions), keys)

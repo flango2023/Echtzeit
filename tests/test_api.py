@@ -547,7 +547,11 @@ def test_the_request_log_is_for_auditors_and_append_only(api, engine):
     mine = api.get("/v1/audit/requests?client_id=auditor&limit=5", headers=auth("auditor")).json()
     assert all(row["client_id"] == "auditor" for row in mine)
     for statement in ("UPDATE api_requests SET status = 200", "DELETE FROM api_requests"):
-        with pytest.raises(DatabaseError, match="append-only"), engine.begin() as conn:
+        # Updates are always refused; deletes until the retention period ends (none is set).
+        with (
+            pytest.raises(DatabaseError, match="append-only|retention period ends"),
+            engine.begin() as conn,
+        ):
             conn.execute(text(statement))
 
 
@@ -587,7 +591,19 @@ def test_the_launcher_refuses_unsafe_settings(tmp_path):
     with pytest.raises(ServeConfigError, match="chmod 600"):
         check_config("0.0.0.0", 8443, cert, key)
     os.chmod(key, 0o600)
-    assert check_config("0.0.0.0", 8443, cert, key).tls
+    with pytest.raises(ServeConfigError, match="unencrypted database"):
+        check_config("0.0.0.0", 8443, cert, key)
+    db_key = tmp_path / "db.key"
+    db_key.write_text("ab" * 32)
+    os.chmod(db_key, 0o644)
+    with pytest.raises(ServeConfigError, match="chmod 600"):
+        check_config("0.0.0.0", 8443, cert, key, db_key)
+    os.chmod(db_key, 0o600)
+    config = check_config("0.0.0.0", 8443, cert, key, db_key)
+    assert config.tls and config.db_key_file == db_key
+    db_key.write_text("not a key")
+    with pytest.raises(ServeConfigError, match="64 hex"):
+        check_config("127.0.0.1", 8000, None, None, db_key)
     with pytest.raises(ServeConfigError, match="both"):
         check_config("127.0.0.1", 8443, cert, None)
     with pytest.raises(ServeConfigError, match="does not exist"):

@@ -2,13 +2,15 @@
 
     python -m echtzeit.api.serve --keys keys.json --db sqlite:///echtzeit.db
     python -m echtzeit.api.serve --keys keys.json --db sqlite:///echtzeit.db \\
-        --host 0.0.0.0 --tls-cert cert.pem --tls-key key.pem
+        --host 0.0.0.0 --tls-cert cert.pem --tls-key key.pem --db-key-file db.key
 
 Rules:
 
 * Without TLS the server binds only to a loopback address (127.0.0.1, ::1 or localhost).
   Any other address needs a certificate and a private key, so keys never cross a network in
   clear text.
+* Any other address also needs --db-key-file, so the database is encrypted at rest
+  (see echtzeit.dbkey). On loopback the key file is optional.
 * The private key file must not be readable by group or others.
 * TLS uses Python's default server context, which refuses protocol versions below TLS 1.2.
 * Over HTTPS every response carries Strict-Transport-Security.
@@ -20,6 +22,8 @@ import os
 import stat
 from dataclasses import dataclass
 from pathlib import Path
+
+from echtzeit.dbkey import DbKeyError, load_key_file
 
 LOOPBACK_NAMES = {"localhost"}
 
@@ -34,6 +38,7 @@ class ServeConfig:
     port: int
     tls_cert: Path | None
     tls_key: Path | None
+    db_key_file: Path | None = None
 
     @property
     def tls(self) -> bool:
@@ -49,7 +54,13 @@ def is_loopback(host: str) -> bool:
         return False
 
 
-def check_config(host: str, port: int, tls_cert: Path | None, tls_key: Path | None) -> ServeConfig:
+def check_config(
+    host: str,
+    port: int,
+    tls_cert: Path | None,
+    tls_key: Path | None,
+    db_key_file: Path | None = None,
+) -> ServeConfig:
     if not 1 <= port <= 65535:
         raise ServeConfigError("port must be between 1 and 65535")
     if (tls_cert is None) != (tls_key is None):
@@ -68,7 +79,17 @@ def check_config(host: str, port: int, tls_cert: Path | None, tls_key: Path | No
                 f"TLS private key {tls_key} is accessible by group or others; "
                 f"run: chmod 600 {tls_key}"
             )
-    return ServeConfig(host, port, tls_cert, tls_key)
+    if db_key_file is None and not is_loopback(host):
+        raise ServeConfigError(
+            f"refusing to listen on {host} with an unencrypted database; give --db-key-file "
+            "(create one with: python -m echtzeit.dbkey new db.key)"
+        )
+    if db_key_file is not None:
+        try:
+            load_key_file(db_key_file)
+        except DbKeyError as exc:
+            raise ServeConfigError(str(exc)) from None
+    return ServeConfig(host, port, tls_cert, tls_key, db_key_file)
 
 
 def main(argv: list[str] | None = None) -> None:
@@ -79,9 +100,10 @@ def main(argv: list[str] | None = None) -> None:
     parser.add_argument("--port", type=int, default=8000)
     parser.add_argument("--tls-cert", type=Path)
     parser.add_argument("--tls-key", type=Path)
+    parser.add_argument("--db-key-file", type=Path, help="database encryption key file (mode 600)")
     args = parser.parse_args(argv)
     try:
-        config = check_config(args.host, args.port, args.tls_cert, args.tls_key)
+        config = check_config(args.host, args.port, args.tls_cert, args.tls_key, args.db_key_file)
     except ServeConfigError as exc:
         parser.error(str(exc))
 
@@ -89,6 +111,8 @@ def main(argv: list[str] | None = None) -> None:
 
     os.environ["ECHTZEIT_API_KEYS_FILE"] = str(args.keys)
     os.environ["ECHTZEIT_DATABASE_URL"] = args.db
+    if config.db_key_file is not None:
+        os.environ["ECHTZEIT_DB_KEY_FILE"] = str(config.db_key_file)
     uvicorn.run(
         "echtzeit.api.app:create_app_from_env",
         factory=True,

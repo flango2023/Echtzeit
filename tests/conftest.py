@@ -1,3 +1,5 @@
+import os
+
 import pytest
 from helpers import BANK_A, Clock, Customer
 
@@ -8,11 +10,14 @@ from echtzeit.ledger import Ledger
 from echtzeit.models import SYSTEM, init_db
 from echtzeit.payments import InstantPaymentProcessor
 
+# ECHTZEIT_TEST_ENCRYPTED=1 runs every ledger test on a SQLCipher-encrypted database.
+TEST_DB_KEY = "5e" * 32 if os.environ.get("ECHTZEIT_TEST_ENCRYPTED") == "1" else None
+
 
 @pytest.fixture
 def engine(tmp_path):
     # A file database, not :memory:, so every thread sees the same data.
-    engine = make_engine(f"sqlite:///{tmp_path / 'test.db'}")
+    engine = make_engine(f"sqlite:///{tmp_path / 'test.db'}", key=TEST_DB_KEY)
     init_db(engine)
     yield engine
     engine.dispose()

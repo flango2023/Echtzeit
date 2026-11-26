@@ -135,10 +135,14 @@ Ledger and database:
 - The database is SQLite, which allows one writer at a time. The concurrency tests show the
   ledger rules hold when requests overlap. They do not show how the code behaves with
   PostgreSQL row locks, and tracing relies on writers being serialized.
-- There are no migrations. Delete any database file created by an earlier version.
-- The audit log has no retention period, access control or tamper-evident chaining. A database
-  administrator can drop the triggers. Rows hold IBANs and amounts, which would be personal
-  data in a real deployment.
+- There are no migrations. Delete any database file created by an earlier version. A database
+  created before the retention tool refuses every purge.
+- The audit log and the request log can be purged after a period the operator sets. They have
+  no tamper-evident chaining, and a database administrator can drop the triggers. Rows hold
+  IBANs and amounts, which would be personal data in a real deployment. The ledger, transfers
+  and holds hold the same kind of data and are never purged.
+- Encryption at rest is optional and needs a key file. There is no key rotation, and losing
+  the key file loses the database.
 - A direct ledger call that fails (for example in a test) leaves no record. Rejected payment
   messages are in the audit log.
 
@@ -165,8 +169,9 @@ Holds and tracing:
 
 - Mixed money cannot be attributed exactly. Two rules give an upper and a lower bound. They
   are not legal tracing rules.
-- Who may place or release a hold is not enforced, because there is no authentication.
-  `placed_by` is a free-text label.
+- Direct Python calls to the ledger do not check who places or releases a hold; `placed_by`
+  is a free-text label there. The HTTP API takes it from the key and lets a bank hold only its
+  own accounts.
 - Held money is only stopped. Returning it to the victim is not implemented.
 - In the scenarios, the time until a freeze is the victim's reporting delay, which is an
   assumption. The time a bank needs to act on a report is not modelled.
@@ -207,8 +212,9 @@ pytest
 python -m echtzeit.scenario_report --seed 7 --spread-seeds 10 --out docs/results/scenarios-seed-7.md
 ```
 
-The report takes about 80 seconds. CI runs `ruff` and `pytest` on Python 3.12 and 3.13, and
-`bandit` and `pip-audit`, for every push.
+The report took about 4 minutes on the machine used here (234 s on 26 November 2026). CI
+runs `ruff` and `pytest` on Python 3.12 and 3.13, runs the tests a second time on an encrypted
+database, and runs `bandit` and `pip-audit`, for every push.
 
 Run the API locally:
 
@@ -229,7 +235,35 @@ python -m echtzeit.api.auth revoke --key-id <key id> --keys keys.json
 ```
 
 The launcher listens on 127.0.0.1:8000. To listen on another address it requires
-`--tls-cert` and `--tls-key`, and the key file must be readable only by its owner.
+`--tls-cert` and `--tls-key`, and the key file must be readable only by its owner. It also
+requires an encrypted database.
+
+Encrypt the database at rest (SQLCipher, installed with the `encryption` extra, which `dev`
+includes):
+
+```bash
+python -m echtzeit.dbkey new db.key
+python -m echtzeit.api.serve --keys keys.json --db sqlite:///echtzeit.db --db-key-file db.key
+```
+
+The key file holds a random 256-bit key, is created with mode 600 and must stay out of version
+control. Keep a copy apart from the database: without it the data cannot be read. The key is
+never put in the database URL. A wrong key is refused when the server starts, and an existing
+unencrypted database cannot be opened with a key. `ECHTZEIT_TEST_ENCRYPTED=1 pytest` runs every
+ledger test again on an encrypted database.
+
+Keep the logs for a limited time. Only `rejected_payments` and `api_requests` can be purged,
+and only after a period you set (at least 30 days). Without a period nothing is deleted:
+
+```bash
+python -m echtzeit.retention --db sqlite:///echtzeit.db set api_requests 90
+python -m echtzeit.retention --db sqlite:///echtzeit.db purge --dry-run
+python -m echtzeit.retention --db sqlite:///echtzeit.db purge
+python -m echtzeit.retention --db sqlite:///echtzeit.db show
+```
+
+The 90 days above is an example, not advice. Add `--db-key-file db.key` for an encrypted
+database. Each purge is recorded in `retention_runs`, which cannot be changed or deleted.
 
 ### macOS with iCloud Drive
 
@@ -254,23 +288,32 @@ Checked:
 
 - XML input is parsed with `defusedxml`. Tests confirm that an entity-expansion payload and an
   external-entity payload are refused.
-- `bandit` reports no issues on `src/`. Two kinds of finding are marked in the code with the
+- `bandit` reports no issues on `src/`. Three kinds of finding are marked in the code with the
   reason. The first is the `xml.etree` import, because those modules only build documents and
   never parse input. The second is the seeded random generator in the simulation, which is
-  needed for reproducible runs. Payment identifiers come from `uuid4`.
+  needed for reproducible runs. Payment identifiers come from `uuid4`. The third is SQL built
+  from table and column names, which come from constants in the code, never from input.
 - `pip-audit` found no known vulnerabilities in the installed dependencies on 25 November
   2026. This is a point-in-time result; CI repeats `bandit` and `pip-audit` on every push.
 - The API authenticates every call, enforces roles and per-bank scope, limits rates and body
   sizes, refuses unknown request fields and hides internals in errors. A threat model lists
   each threat with its mitigation and the test that shows it:
   [threat-model.md](docs/design/threat-model.md).
+- With a key file, the database and its write-ahead log are encrypted with SQLCipher, and the
+  launcher requires this on any address other than loopback. Tests check that the file on disk
+  contains neither the SQLite header nor an IBAN, and that a wrong key is refused.
+- The audit and request logs can be purged after an operator-set period, following the GDPR's
+  storage-limitation principle
+  ([Regulation (EU) 2016/679](https://eur-lex.europa.eu/eli/reg/2016/679/oj), art. 5(1)(e)).
+  Database triggers refuse to delete younger rows, and refuse every delete when no period is
+  set.
 - No credentials, tokens or real personal data are stored in the repository.
 
 Not done yet:
 
-- Certificates, key storage outside a file and multi-process rate limits are left to the
-  deployment.
-- There is no database encryption and no retention period for the audit and request logs.
+- Certificates, key storage outside a file (for API keys and the database key) and
+  multi-process rate limits are left to the deployment.
+- Purges do not run on a schedule, and the database key cannot be rotated.
 - Message-level protection such as signing is not implemented.
 
 Do not expose this code to a network or use it with real money or real customer data.
