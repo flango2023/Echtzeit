@@ -56,6 +56,24 @@ These numbers are not evidence about real fraud. The same author wrote the scena
 risk rules, so the results are circular by construction. Every probability, delay and amount
 is an assumption, and the results file lists all of them.
 
+## Repository layout
+
+| Path | What it holds |
+|---|---|
+| `src/echtzeit/` | The library: ledger, holds, tracing, payment processing, risk scoring, simulation, liability regimes, calibration, results report, retention and database setup. |
+| `src/echtzeit/iso20022/` | Building and parsing `pacs.008` and `pacs.002` messages, and IBAN, BIC and UETR checks. |
+| `src/echtzeit/api/` | The HTTP API: endpoints, API keys and roles, rate limits, and the launcher with its TLS and key checks. |
+| `tests/` | The pytest suite, one file per module area, plus shared fixtures (`conftest.py`, `helpers.py`). |
+| `docs/design/` | Design notes: holds and tracing, scenarios and scoring, liability regimes, threat model. |
+| `docs/results/` | The generated results for seed 7. Produced by `echtzeit.scenario_report`; not edited by hand. |
+| `.github/workflows/` | CI: lint, tests on Python 3.12 to 3.14 (plain and encrypted database), `bandit` and `pip-audit`. |
+| `pyproject.toml` | Package metadata, dependencies and extras (`api`, `encryption`, `dev`), pytest and ruff settings. |
+| `LICENSE`, `NOTICE` | Apache License 2.0 and the copyright notice. |
+| `.gitignore` | Keeps environments, databases, key files and certificates out of git. |
+
+GitHub shows the last commit message next to each path, not a description; this table is the
+description.
+
 ## Architecture
 
 Modules in `src/echtzeit/` and how they depend on each other. An arrow points from a module to
