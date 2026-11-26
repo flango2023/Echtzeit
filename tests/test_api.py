@@ -1,13 +1,21 @@
 import json
 import os
 import stat
-from datetime import UTC, date, datetime
+from datetime import UTC, date, datetime, timedelta
 
 import pytest
 from fastapi.testclient import TestClient
 
 from echtzeit.api.app import create_app, create_app_from_env
-from echtzeit.api.auth import KeyFileError, KeyStore, Role, add_key, hash_key
+from echtzeit.api.auth import (
+    KeyFileError,
+    KeyStore,
+    Role,
+    add_key,
+    hash_key,
+    list_keys,
+    revoke_key,
+)
 from echtzeit.api.ratelimit import RateLimiter
 from echtzeit.iso20022 import pacs002, pacs008
 from echtzeit.iso20022.identifiers import make_german_iban, new_uetr
@@ -23,10 +31,18 @@ KEYS = {
 }
 
 
+EXPIRES = "2027-11-25T00:00:00+00:00"
+
+
 def keystore() -> KeyStore:
     entries = []
     for client_id, key in KEYS.items():
-        entry = {"client_id": client_id, "key_sha256": hash_key(key)}
+        entry = {
+            "client_id": client_id,
+            "key_sha256": hash_key(key),
+            "key_id": client_id.replace("-", "") + "0000",
+            "expires_at": EXPIRES,
+        }
         if client_id.startswith("bank-"):
             entry["role"] = "psp"
             entry["bic"] = {"bank-a": BANK_A, "bank-b": BANK_B, "bank-c": BANK_C}[client_id]
@@ -407,15 +423,62 @@ def test_banks_see_only_rejections_that_involve_them(api, world):
 
 def test_new_keys_are_stored_only_as_hashes_in_a_private_file(tmp_path):
     path = tmp_path / "keys.json"
-    key = add_key(path, "bank-a", Role.PSP, BANK_A)
+    key, key_id = add_key(path, "bank-a", Role.PSP, BANK_A)
     assert key.startswith("ez_") and len(key) > 40
     assert stat.S_IMODE(path.stat().st_mode) == 0o600
     assert key not in path.read_text()
     store = KeyStore.from_file(path)
-    assert store.authenticate(key).client_id == "bank-a"
+    found = store.authenticate(key)
+    assert (found.client_id, found.key_id) == ("bank-a", key_id)
     assert store.authenticate(key + "x") is None
-    second = add_key(path, "auditor", Role.AUDITOR, None)
+    second, _ = add_key(path, "auditor", Role.AUDITOR, None)
     assert KeyStore.from_file(path).authenticate(second).role is Role.AUDITOR
+    listing = list_keys(path)
+    assert {entry["client_id"] for entry in listing} == {"bank-a", "auditor"}
+    assert all("key_sha256" not in entry for entry in listing)
+
+
+def test_keys_expire(tmp_path):
+    path = tmp_path / "keys.json"
+    created = datetime(2026, 1, 1, tzinfo=UTC)
+    key, _ = add_key(path, "bank-a", Role.PSP, BANK_A, valid_days=30, now=created)
+    store = KeyStore.from_file(path)
+    assert store.authenticate(key, created + timedelta(days=29)) is not None
+    assert store.authenticate(key, created + timedelta(days=30)) is None
+    for days in (0, 366):
+        with pytest.raises(KeyFileError, match="valid_days"):
+            add_key(path, "bank-b", Role.PSP, BANK_B, valid_days=days)
+
+
+def test_rotation_and_revocation_work_without_a_restart(tmp_path):
+    path = tmp_path / "keys.json"
+    clock = {"t": 0.0}
+    old, old_id = add_key(path, "bank-a", Role.PSP, BANK_A)
+    store = KeyStore.from_file(path, monotonic=lambda: clock["t"])
+    new, new_id = add_key(path, "bank-a", Role.PSP, BANK_A)  # rotation: both keys valid
+    clock["t"] += 5
+    assert store.authenticate(old).key_id == old_id
+    assert store.authenticate(new).key_id == new_id
+    revoke_key(path, old_id)
+    clock["t"] += 5
+    assert store.authenticate(old) is None
+    assert store.authenticate(new).key_id == new_id
+    with pytest.raises(KeyFileError, match="no key"):
+        revoke_key(path, old_id)
+
+
+def test_a_broken_key_file_refuses_every_key_until_fixed(tmp_path):
+    path = tmp_path / "keys.json"
+    clock = {"t": 0.0}
+    key, _ = add_key(path, "bank-a", Role.PSP, BANK_A)
+    store = KeyStore.from_file(path, monotonic=lambda: clock["t"])
+    good = path.read_text()
+    path.write_text("[not json")
+    clock["t"] += 5
+    assert store.authenticate(key) is None and store.broken
+    path.write_text(good)
+    clock["t"] += 5
+    assert store.authenticate(key) is not None and not store.broken
 
 
 def test_unsafe_or_invalid_key_files_are_refused(tmp_path):
@@ -426,13 +489,25 @@ def test_unsafe_or_invalid_key_files_are_refused(tmp_path):
         KeyStore.from_file(path)
     with pytest.raises(KeyFileError, match="does not exist"):
         KeyStore.from_file(tmp_path / "missing.json")
-    digest = hash_key("ez_x")
+    base = {
+        "client_id": "a",
+        "key_id": "abcd1234",
+        "key_sha256": hash_key("ez_x"),
+        "expires_at": EXPIRES,
+    }
     bad = [
-        [{"client_id": "a", "role": "psp", "key_sha256": digest}],  # psp without bic
-        [{"client_id": "a", "role": "auditor", "bic": BANK_A, "key_sha256": digest}],
-        [{"client_id": "a", "role": "root", "key_sha256": digest}],
-        [{"client_id": "a", "role": "admin", "key_sha256": "short"}],
-        [{"client_id": "a", "role": "admin", "key_sha256": digest}] * 2,
+        [{**base, "role": "psp"}],  # psp without bic
+        [{**base, "role": "auditor", "bic": BANK_A}],
+        [{**base, "role": "root"}],
+        [{**base, "role": "admin", "key_sha256": "short"}],
+        [{**base, "role": "admin", "key_id": "x"}],
+        [{**base, "role": "admin", "expires_at": "2027-01-01T00:00:00"}],  # no time zone
+        [{k: v for k, v in {**base, "role": "admin"}.items() if k != "expires_at"}],
+        [{**base, "role": "admin"}, {**base, "role": "admin"}],  # duplicate key_id
+        [
+            {**base, "role": "admin"},
+            {**base, "role": "auditor", "key_id": "efgh5678"},
+        ],  # role differs
     ]
     for entries in bad:
         with pytest.raises(KeyFileError):
@@ -440,6 +515,85 @@ def test_unsafe_or_invalid_key_files_are_refused(tmp_path):
     with pytest.raises(KeyFileError):
         add_key(tmp_path / "other.json", "x", Role.PSP, None)
     assert not (tmp_path / "other.json").exists()
+
+
+# -- request log ----------------------------------------------------------------------------
+
+
+def test_every_call_is_logged_without_bodies_keys_or_path_values(api, world):
+    alice, _ = world
+    response = api.get(f"/v1/accounts/{alice['iban']}", headers=auth("bank-a"))
+    api.get("/v1/invariants", headers={"Authorization": "Bearer ez_wrong"})
+    api.get("/v1/health")
+    rows = api.get("/v1/audit/requests", headers=auth("auditor")).json()
+    by_route = {(row["method"], row["route"], row["status"]): row for row in rows}
+    read = by_route[("GET", "/v1/accounts/{iban}", 200)]
+    assert read["client_id"] == "bank-a" and read["key_id"] == "banka0000"
+    assert read["request_id"] == response.headers["x-request-id"]
+    assert read["source"] is None
+    failed = by_route[("GET", "/v1/invariants", 401)]
+    assert failed["client_id"] is None and failed["source"]
+    assert all(row["route"] != "/v1/health" for row in rows)
+    text = json.dumps(rows)
+    assert alice["iban"] not in text and "ez_" not in text and "Alice" not in text
+
+
+def test_the_request_log_is_for_auditors_and_append_only(api, engine):
+    from sqlalchemy import text
+    from sqlalchemy.exc import DatabaseError
+
+    assert api.get("/v1/audit/requests", headers=auth("bank-a")).status_code == 403
+    assert api.get("/v1/audit/requests", headers=auth("admin")).status_code == 403
+    mine = api.get("/v1/audit/requests?client_id=auditor&limit=5", headers=auth("auditor")).json()
+    assert all(row["client_id"] == "auditor" for row in mine)
+    for statement in ("UPDATE api_requests SET status = 200", "DELETE FROM api_requests"):
+        with pytest.raises(DatabaseError, match="append-only"), engine.begin() as conn:
+            conn.execute(text(statement))
+
+
+def test_a_failing_request_log_does_not_change_the_response(ledger, audit, monkeypatch):
+    api = TestClient(create_app(ledger, audit, keystore()))
+
+    def broken(*_args, **_kwargs):
+        raise RuntimeError("log store down")
+
+    monkeypatch.setattr(type(audit), "record_request", broken)
+    assert api.get("/v1/invariants", headers=auth("auditor")).status_code == 200
+
+
+# -- transport security ---------------------------------------------------------------------
+
+
+def test_hsts_is_sent_only_over_https(ledger, audit):
+    app = create_app(ledger, audit, keystore())
+    secure = TestClient(app, base_url="https://testserver").get("/v1/health")
+    assert secure.headers["strict-transport-security"] == "max-age=31536000"
+    plain = TestClient(app).get("/v1/health")
+    assert "strict-transport-security" not in plain.headers
+
+
+def test_the_launcher_refuses_unsafe_settings(tmp_path):
+    from echtzeit.api.serve import ServeConfigError, check_config, is_loopback
+
+    assert is_loopback("127.0.0.1") and is_loopback("::1") and is_loopback("localhost")
+    assert not is_loopback("0.0.0.0") and not is_loopback("192.168.1.5")
+    assert not check_config("127.0.0.1", 8000, None, None).tls
+    with pytest.raises(ServeConfigError, match="without TLS"):
+        check_config("0.0.0.0", 8000, None, None)
+    cert, key = tmp_path / "cert.pem", tmp_path / "key.pem"
+    cert.write_text("cert")
+    key.write_text("key")
+    os.chmod(key, 0o644)
+    with pytest.raises(ServeConfigError, match="chmod 600"):
+        check_config("0.0.0.0", 8443, cert, key)
+    os.chmod(key, 0o600)
+    assert check_config("0.0.0.0", 8443, cert, key).tls
+    with pytest.raises(ServeConfigError, match="both"):
+        check_config("127.0.0.1", 8443, cert, None)
+    with pytest.raises(ServeConfigError, match="does not exist"):
+        check_config("0.0.0.0", 8443, tmp_path / "missing.pem", key)
+    with pytest.raises(ServeConfigError, match="port"):
+        check_config("127.0.0.1", 0, None, None)
 
 
 def test_the_server_does_not_start_without_a_key_file(monkeypatch, tmp_path):

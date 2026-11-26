@@ -159,8 +159,37 @@ class RejectedPayment(Base):
     reply_msg_id: Mapped[str] = mapped_column(String(35))
 
 
+class ApiRequest(Base):
+    """One API call: who made it, which endpoint, the outcome. Append-only.
+
+    No request bodies, keys or path values are stored. The route is the template
+    (for example /v1/accounts/{iban}), so IBANs do not end up in this log. The source address is
+    kept only for calls that failed authentication, to investigate guessing attempts.
+    """
+
+    __tablename__ = "api_requests"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    at: Mapped[datetime] = mapped_column(DateTime, index=True)
+    request_id: Mapped[str] = mapped_column(String(36))
+    client_id: Mapped[str | None] = mapped_column(String(100), nullable=True, index=True)
+    key_id: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    method: Mapped[str] = mapped_column(String(10))
+    route: Mapped[str] = mapped_column(String(200))
+    status: Mapped[int] = mapped_column(Integer)
+    duration_ms: Mapped[int] = mapped_column(Integer)
+    source: Mapped[str | None] = mapped_column(String(64), nullable=True)
+
+
 # Append-only enforcement. Corrections must be new transfers, never edits.
-for _table in ("ledger_entries", "transfers", "rejected_payments", "holds", "hold_releases"):
+for _table in (
+    "ledger_entries",
+    "transfers",
+    "rejected_payments",
+    "holds",
+    "hold_releases",
+    "api_requests",
+):
     for _op in ("UPDATE", "DELETE"):
         _ddl = DDL(
             f"CREATE TRIGGER IF NOT EXISTS {_table}_no_{_op.lower()} "

@@ -15,7 +15,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session, sessionmaker
 
 from echtzeit.iso20022 import pacs002, pacs008
-from echtzeit.models import RejectedPayment
+from echtzeit.models import ApiRequest, RejectedPayment, to_db_time
 
 
 @dataclass(frozen=True)
@@ -88,3 +88,54 @@ class AuditLog:
 
     def count_by_reason(self) -> dict[str, int]:
         return dict(Counter(record.reason_code for record in self.rejections()))
+
+    # -- API request log ---------------------------------------------------------------------
+
+    def record_request(
+        self,
+        *,
+        at: datetime,
+        request_id: str,
+        client_id: str | None,
+        key_id: str | None,
+        method: str,
+        route: str,
+        status: int,
+        duration_ms: int,
+        source: str | None,
+    ) -> None:
+        with self._sessions.begin() as session:
+            session.add(
+                ApiRequest(
+                    at=to_db_time(at),
+                    request_id=request_id,
+                    client_id=client_id,
+                    key_id=key_id,
+                    method=method[:10],
+                    route=route[:200],
+                    status=status,
+                    duration_ms=duration_ms,
+                    source=source[:64] if source else None,
+                )
+            )
+
+    def requests(self, *, client_id: str | None = None, limit: int = 100) -> list[dict]:
+        """Most recent API calls first, optionally for one client."""
+        statement = select(ApiRequest).order_by(ApiRequest.id.desc()).limit(limit)
+        if client_id is not None:
+            statement = statement.where(ApiRequest.client_id == client_id)
+        with self._sessions() as session, session.begin():
+            return [
+                {
+                    "at": row.at.isoformat(),
+                    "request_id": row.request_id,
+                    "client_id": row.client_id,
+                    "key_id": row.key_id,
+                    "method": row.method,
+                    "route": row.route,
+                    "status": row.status,
+                    "duration_ms": row.duration_ms,
+                    "source": row.source,
+                }
+                for row in session.scalars(statement)
+            ]

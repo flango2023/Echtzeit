@@ -1,9 +1,8 @@
 """HTTP API for the simulator. Every request needs an API key, except the health check.
 
-Run locally only (see the README):
+Start it with the launcher, which refuses unsafe network settings (see `echtzeit.api.serve`):
 
-    ECHTZEIT_DATABASE_URL=sqlite:///echtzeit.db ECHTZEIT_API_KEYS_FILE=keys.json \\
-        uvicorn --factory echtzeit.api.app:create_app_from_env --host 127.0.0.1
+    python -m echtzeit.api.serve --keys keys.json --db sqlite:///echtzeit.db
 
 Authorization rules, all enforced here:
 
@@ -15,9 +14,16 @@ Authorization rules, all enforced here:
 * An admin creates and funds accounts and does nothing else.
 
 Who placed or released a hold is the authenticated client id, never a value from the request.
+
+Every call except the health check is written to the API request log: time, client, key id,
+method, route template, status and duration. Bodies, keys and path values are never stored.
+The log is written after the response, so a failure to write it is reported in the server log
+but does not change the response.
 """
 
+import logging
 import os
+import time
 import uuid
 from collections.abc import Callable
 from datetime import UTC, datetime
@@ -150,6 +156,52 @@ class _TooLarge(Exception):
     pass
 
 
+logger = logging.getLogger("echtzeit.api")
+
+
+class RequestLog:
+    """Write one row per API call to the request log, after the response is sent."""
+
+    def __init__(self, app: ASGIApp, audit: AuditLog, clock: Callable[[], datetime]):
+        self.app = app
+        self.audit = audit
+        self.clock = clock
+
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        if scope["type"] != "http" or scope.get("path") == "/v1/health":
+            await self.app(scope, receive, send)
+            return
+        started = time.perf_counter()
+        status = {"code": 500}
+
+        async def capture(message: Message) -> None:
+            if message["type"] == "http.response.start":
+                status["code"] = message["status"]
+            await send(message)
+
+        try:
+            await self.app(scope, receive, capture)
+        finally:
+            state = scope.get("state", {})
+            route = getattr(scope.get("route"), "path", None) or "(no route)"
+            failed_auth = state.get("auth_failed", False)
+            client = scope.get("client")
+            try:
+                self.audit.record_request(
+                    at=self.clock(),
+                    request_id=state.get("request_id", ""),
+                    client_id=state.get("client_id"),
+                    key_id=state.get("key_id"),
+                    method=scope.get("method", ""),
+                    route=route,
+                    status=status["code"],
+                    duration_ms=round((time.perf_counter() - started) * 1000),
+                    source=client[0] if failed_auth and client else None,
+                )
+            except Exception:  # the response is already sent; report and carry on
+                logger.exception("could not write the API request log")
+
+
 class SecurityHeaders:
     """Add headers to every response, including error responses from outer middleware."""
 
@@ -160,17 +212,19 @@ class SecurityHeaders:
         if scope["type"] != "http":
             await self.app(scope, receive, send)
             return
-        request_id = str(uuid.uuid4()).encode()
+        request_id = str(uuid.uuid4())
+        scope.setdefault("state", {})["request_id"] = request_id
+        extra = [
+            (b"x-request-id", request_id.encode()),
+            (b"cache-control", b"no-store"),
+            (b"x-content-type-options", b"nosniff"),
+        ]
+        if scope.get("scheme") == "https":
+            extra.append((b"strict-transport-security", b"max-age=31536000"))
 
         async def with_headers(message: Message) -> None:
             if message["type"] == "http.response.start":
-                message.setdefault("headers", [])
-                message["headers"] = [
-                    *message["headers"],
-                    (b"x-request-id", request_id),
-                    (b"cache-control", b"no-store"),
-                    (b"x-content-type-options", b"nosniff"),
-                ]
+                message["headers"] = [*message.get("headers", []), *extra]
             await send(message)
 
         await self.app(scope, receive, with_headers)
@@ -244,13 +298,16 @@ def create_app(
     def client(request: Request) -> Client:
         header = request.headers.get("authorization", "")
         scheme, _, token = header.partition(" ")
-        found = keys.authenticate(token.strip()) if scheme.lower() == "bearer" else None
+        found = keys.authenticate(token.strip(), clock()) if scheme.lower() == "bearer" else None
         if found is None:
+            request.state.auth_failed = True
             source = request.client.host if request.client else "unknown"
             wait = failed_auth_limiter.acquire(f"failed:{source}")
             if wait:
                 raise HTTPException(429, "Too many failed attempts", {"Retry-After": f"{wait:.0f}"})
             raise HTTPException(401, "Missing or invalid API key", {"WWW-Authenticate": "Bearer"})
+        request.state.client_id = found.client_id
+        request.state.key_id = found.key_id
         wait = limiter.acquire(found.client_id)
         if wait:
             raise HTTPException(
@@ -495,6 +552,15 @@ def create_app(
             for r in records
         ]
 
+    @app.get("/v1/audit/requests")
+    def api_requests(
+        caller: Caller,
+        client_id: Annotated[str | None, Query(max_length=100)] = None,
+        limit: Annotated[int, Query(ge=1, le=1000)] = 100,
+    ) -> list[dict]:
+        require(caller, Role.AUDITOR)
+        return audit.requests(client_id=client_id, limit=limit)
+
     @app.get("/v1/invariants")
     def invariants(caller: Caller) -> dict:
         require(caller, Role.AUDITOR, Role.ADMIN)
@@ -502,6 +568,7 @@ def create_app(
         return {"ok": report.ok, "problems": report.problems}
 
     app.add_middleware(BodyLimit, max_bytes=max_body_bytes)
+    app.add_middleware(RequestLog, audit=audit, clock=clock)
     app.add_middleware(SecurityHeaders)  # added last, so it is the outermost
     return app
 
