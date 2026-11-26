@@ -39,6 +39,19 @@ force), the victim's bank carries every loss unless both banks monitored the pay
 (art. 87(3)). Only `FULL_CHAIN` has the receiving bank screen incoming payments; there the
 rules on suspicion (art. 68) and impersonation (art. 60) decide instead.
 
+Checked against real, published figures (details in the results file):
+
+- At the EU fraud rate of about one fraudulent credit transfer in 50,000 (EBA and ECB, 2025),
+  the warning rate of sending-side scoring on seed 7 would mean about 3,700 flagged normal
+  payments for each scam payment. The simulation's own scam share, about 3%, hides that cost.
+- With scam amounts around the EBA-ECB average of EUR 2,155 instead of the default amounts,
+  sending-side scoring loses more (median 25.4% of scam money, against 17.8%), because the
+  amount rules fire less often. Screening incoming payments still keeps the median loss at
+  0.3%.
+- The simulated UK regime reimburses 97% of the money in covered claims, against 88% in the
+  PSR's dashboard. Treating an ignored warning as gross negligence would reject most covered
+  claims in the scored policies, against 3% in reality.
+
 These numbers are not evidence about real fraud. The same author wrote the scenarios and the
 risk rules, so the results are circular by construction. Every probability, delay and amount
 is an assumption, and the results file lists all of them.
@@ -54,6 +67,7 @@ is an assumption, and the results file lists all of them.
 | `holds`, `tracing` | Holds stop money on an account. Tracing follows a payment through later transfers. Freezing holds what is still there. | [holds-and-tracing.md](docs/design/holds-and-tracing.md) |
 | `vop`, `risk` | Verification of Payee with the four EPC outcomes, a rule-based risk score for outgoing payments and an incoming screen for the payee's bank. Every result lists the rules that fired. | [scenarios-and-scoring.md](docs/design/scenarios-and-scoring.md) |
 | `simulation`, `scenario_report` | A seeded synthetic population with normal payments and three scam patterns from the EPC fraud report. Four policies compared on the same world. | [scenarios-and-scoring.md](docs/design/scenarios-and-scoring.md) |
+| `calibration` | Real, sourced reference figures (EBA-ECB, PSR) and the base-rate conversion. | [scenarios-and-scoring.md](docs/design/scenarios-and-scoring.md) |
 | `liability` | Shares each loss between the victim, the sending bank and the receiving bank under the UK rules, the provisional EU rules, Brazil's MED and a no-refund baseline. | [liability.md](docs/design/liability.md) |
 | `api` | HTTP API with expiring API keys, roles (bank, auditor, admin), per-bank authorization, rate and size limits, a per-client request log and a launcher that requires TLS off localhost. | [threat-model.md](docs/design/threat-model.md) |
 
@@ -296,6 +310,8 @@ code from them is copied into the repository.
   November 2025, for the EU regime (art. 27, 50, 60, 68, 73 and 87).
 - ECB euro foreign exchange reference rate GBP/EUR of 24 November 2026, for converting the UK
   cap and excess.
+- EBA and ECB, 2025 Report on payment fraud, and the PSR's APP scams reimbursement dashboard
+  for Q1 2026, for the reference figures in `echtzeit/calibration.py`.
 - Banco Central do Brasil: Resolução BCB nº 493 of 28 August 2025 and the Manual Operacional
   do DICT, version 8.5, section 20, for the MED funds recovery.
 

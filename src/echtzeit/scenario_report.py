@@ -15,6 +15,7 @@ import statistics
 from dataclasses import fields
 from pathlib import Path
 
+from echtzeit import calibration
 from echtzeit.liability import ECB_GBP_PER_EUR, ECB_RATE_DATE, REGIMES, Assumptions, totals
 from echtzeit.risk import RiskConfig
 from echtzeit.simulation import Policy, ScenarioConfig, SimulationResult, simulate
@@ -35,7 +36,11 @@ def _ms(value: float | None) -> str:
     return "n/a" if value is None else f"{value:.2f} ms"
 
 
-def render_spread(runs: dict[int, list[SimulationResult]]) -> list[str]:
+def render_spread(
+    runs: dict[int, list[SimulationResult]],
+    title: str | None = None,
+    note: list[str] | None = None,
+) -> list[str]:
     """Minimum, median and maximum over seeds, per policy."""
     seeds = sorted(runs)
     policies = [result.policy for result in runs[seeds[0]]]
@@ -78,10 +83,11 @@ def render_spread(runs: dict[int, list[SimulationResult]]) -> list[str]:
         if regime.receiving_share or regime.covered_victims:
             metrics.append((f"Banks bear under {regime.code}, share of attempted", banks, "{:.1%}"))
     lines = [
-        f"## Spread over seeds {seeds[0]}–{seeds[-1]}",
+        title or f"## Spread over seeds {seeds[0]}–{seeds[-1]}",
         "",
         "Minimum / median / maximum over the seeds, for each policy.",
         "",
+        *([*note, ""] if note else []),
         "| | " + " | ".join(p.value for p in policies) + " |",
         "|---|" + "---|" * len(policies),
     ]
@@ -100,8 +106,117 @@ def render_spread(runs: dict[int, list[SimulationResult]]) -> list[str]:
     return lines
 
 
+def flagged_share(result: SimulationResult) -> float:
+    """Normal payments warned, blocked or held back by the receiving bank."""
+    legit = result.legit
+    return (legit.warned + legit.blocked + legit.held_back_by_receiver) / max(1, legit.payments)
+
+
+def render_real_rate(results: list[SimulationResult]) -> list[str]:
+    rate = calibration.CT_FRAUD_RATE_BY_NUMBER
+    per_scam = calibration.normal_payments_per_scam(rate.value)
+    lines = [
+        "## At the real fraud rate",
+        "",
+        (
+            f"In this simulation about {len(results[0].cases)} of {results[0].legit.payments + len(results[0].cases)} "
+            "payments are scams. In the EU/EEA in 2024, fraudulent credit transfers were "
+            f"{rate.value * 100:.3f}% of all credit transfers by number ({rate.source.title}, {rate.where}), "
+            f"about one in {per_scam:,.0f}. If the share of normal payments flagged here carried over to real "
+            "payments, each scam payment would come with this many flagged normal payments:"
+        ),
+        "",
+        "| Policy | Normal payments flagged | Flagged normal payments per scam payment at the real rate |",
+        "|---|---|---|",
+    ]
+    for result in results:
+        share = flagged_share(result)
+        lines.append(
+            f"| {result.policy.value} | {share:.2%} "
+            f"| {calibration.flagged_per_scam_at_real_rate(share, rate.value):,.0f} |"
+        )
+    lines += [
+        "",
+        "Flagged means warned or blocked by the sending bank, or held back by the receiving bank.",
+        "This is an order of magnitude. The real rate covers every kind of credit-transfer fraud and",
+        "every credit transfer, and the simulated flag rate depends on assumed habits of normal",
+        "customers.",
+        "",
+    ]
+    return lines
+
+
+def render_uk_check(results: list[SimulationResult]) -> list[str]:
+    reimbursed = calibration.UK_REIMBURSED_SHARE
+    rejected = calibration.UK_REJECTED_FOR_CARE_SHARE
+    lines = [
+        "## UK regime compared with the PSR dashboard",
+        "",
+        f"Real figures ({reimbursed.source.title}): {reimbursed.value:.0%} of the money lost to APP",
+        f"scams was reimbursed, and {rejected.value:.0%} of claims were rejected because the customer",
+        "did not take enough care. Simulated, over claims whose victim type the UK rules cover:",
+        "",
+        "| Policy | Claims in scope | Reimbursed share | Rejected for lack of care | Same, if ignoring a warning counted as gross negligence |",
+        "|---|---|---|---|---|",
+    ]
+    strict = Assumptions(ignored_warning_is_gross_negligence=True)
+    strict_shares = []
+    for result in results:
+        base = calibration.uk_outcomes(result.cases, Assumptions())
+        tough = calibration.uk_outcomes(result.cases, strict)
+        if tough.simulated_rejected_for_care_share is not None:
+            strict_shares.append(tough.simulated_rejected_for_care_share)
+
+        def pct(value):
+            return "–" if value is None else f"{value:.0%}"
+
+        lines.append(
+            f"| {result.policy.value} | {base.cases_in_scope} | {pct(base.simulated_reimbursed_share)} "
+            f"| {pct(base.simulated_rejected_for_care_share)} | {pct(tough.simulated_rejected_for_care_share)} |"
+        )
+    lines += [
+        "",
+        "The simulated share is higher because the model refunds every in-scope claim except the",
+        "excess and never rejects one for lack of care unless the sensitivity switch is on. The",
+        "dashboard does not define its denominator in exactly these terms, so the two shares are",
+        "not strictly comparable. The comparison shows what the model leaves out; nothing is tuned",
+        "to match it.",
+        "",
+    ]
+    highest = max(strict_shares, default=0)
+    if highest > rejected.value:
+        lines[-1:-1] = [
+            f"With the switch on, up to {highest:.0%} of in-scope claims are rejected here, against the",
+            f"{rejected.value:.0%} the PSR reports. That argues against reading an ignored warning as",
+            "gross negligence.",
+            "",
+        ]
+    return lines
+
+
+def render_figures() -> list[str]:
+    lines = [
+        "## Reference figures",
+        "",
+        "| Figure | Value | Source | Where |",
+        "|---|---|---|---|",
+    ]
+    for figure in calibration.FIGURES:
+        if figure.unit == "share":
+            value = f"{(figure.value * 100).normalize():f}%"
+        else:
+            value = f"{figure.value:,} {figure.unit}"
+        lines.append(
+            f"| {figure.name} | {value} | [{figure.source.title}]({figure.source.url}) | {figure.where} |"
+        )
+    lines.append("")
+    return lines
+
+
 def render(
-    results: list[SimulationResult], spread: dict[int, list[SimulationResult]] | None = None
+    results: list[SimulationResult],
+    spread: dict[int, list[SimulationResult]] | None = None,
+    calibrated: dict[int, list[SimulationResult]] | None = None,
 ) -> str:
     config = results[0].config
     risk = results[0].risk_config
@@ -169,6 +284,22 @@ def render(
     ]
     if spread:
         lines += render_spread(spread)
+    lines += render_real_rate(results)
+    if calibrated:
+        mean = next(iter(calibrated.values()))[0].config.scam_amount_mean_cents
+        seeds = sorted(calibrated)
+        lines += render_spread(
+            calibrated,
+            title=(
+                f"## Sensitivity: scam amounts around EUR {mean / 100:,.0f}, seeds {seeds[0]}–{seeds[-1]}"
+            ),
+            note=[
+                "Scam amounts drawn between half and one and a half times the EBA-ECB average value",
+                "of a fraudulent credit transfer (the shape of that distribution is an assumption).",
+                "Every other setting is unchanged.",
+            ],
+        )
+    lines += render_uk_check(results)
 
     for result in results:
         lines += [
@@ -188,6 +319,7 @@ def render(
         lines.append("")
 
     lines += render_liability(results)
+    lines += render_figures()
     lines += ["## Assumptions (ScenarioConfig)", "", "| Setting | Value |", "|---|---|"]
     for item in fields(config):
         lines.append(f"| `{item.name}` | {getattr(config, item.name)} |")
@@ -294,12 +426,18 @@ def main() -> None:
     parser.add_argument("--out", type=Path)
     args = parser.parse_args()
 
-    def run_all(seed: int) -> list[SimulationResult]:
-        return [simulate(policy, ScenarioConfig(seed=seed), RiskConfig()) for policy in Policy]
+    def run_all(seed: int, **overrides) -> list[SimulationResult]:
+        config = ScenarioConfig(seed=seed, **overrides)
+        return [simulate(policy, config, RiskConfig()) for policy in Policy]
 
     results = run_all(args.seed)
     spread = {seed: run_all(seed) for seed in range(1, args.spread_seeds + 1)} or None
-    text = render(results, spread)
+    eba_mean_cents = int(calibration.CT_FRAUD_AVERAGE_EUR.value * 100)
+    calibrated = {
+        seed: run_all(seed, scam_amount_mean_cents=eba_mean_cents)
+        for seed in range(1, args.spread_seeds + 1)
+    } or None
+    text = render(results, spread, calibrated)
     if args.out:
         args.out.parent.mkdir(parents=True, exist_ok=True)
         args.out.write_text(text, encoding="utf-8")

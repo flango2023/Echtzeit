@@ -136,6 +136,11 @@ class ScenarioConfig:
     # family member's account opened during the measured period. Without them, no normal payee
     # would ever be new, and receiving-side rules about first payments could never misfire.
     new_account_gifts: int = 6
+    # None: scam amounts as described above. A value: every scam amount is drawn uniformly
+    # between half and one and a half times this mean (a safe-account victim never sends more
+    # than the available balance). Used for a sensitivity run with the EBA-ECB average value of
+    # a fraudulent credit transfer; the shape of the distribution is an assumption.
+    scam_amount_mean_cents: int | None = None
 
 
 @dataclass
@@ -578,6 +583,16 @@ class _Run:
             )
         return mule
 
+    def _calibrated_amount(self, rng: random.Random) -> int | None:
+        """A scam amount around the configured mean, or None when amounts are not calibrated.
+
+        Draws nothing from the generator when not calibrated, so the default world is unchanged.
+        """
+        mean = self.cfg.scam_amount_mean_cents
+        if mean is None:
+            return None
+        return rng.randint(max(1, mean // 2), max(1, mean * 3 // 2))
+
     def build_scams(self) -> None:
         cfg, rng = self.cfg, self.rng
         victims = rng.sample(self.consumers, cfg.safe_account_cases)
@@ -588,6 +603,7 @@ class _Run:
             )
             mule = self.new_mule(case_id, 1)
             share = rng.uniform(0.5, 1.0)
+            target = self._calibrated_amount(rng)
             if _draw(cfg.seed, case_id, "name") < cfg.fraudster_gives_mule_name:
                 typed = mule.name
             else:
@@ -595,7 +611,14 @@ class _Run:
             self.at(
                 moment,
                 self.scam_payment(
-                    case_id, "SAFE_ACCOUNT", "CONSUMER", victim, mule, typed, share=share
+                    case_id,
+                    "SAFE_ACCOUNT",
+                    "CONSUMER",
+                    victim,
+                    mule,
+                    typed,
+                    share=share,
+                    target_cents=target,
                 ),
             )
 
@@ -607,7 +630,7 @@ class _Run:
                 days=rng.randrange(cfg.days), hours=rng.randint(9, 17), minutes=rng.randint(0, 59)
             )
             mule = self.new_mule(case_id, 1)
-            cents = rng.randint(80_000, 600_000)
+            cents = self._calibrated_amount(rng) or rng.randint(80_000, 600_000)
             micro = _draw(cfg.seed, "microenterprise", business.name) < cfg.microenterprise_share
             victim_type = "MICROENTERPRISE" if micro else "OTHER_BUSINESS"
             self.at(
@@ -634,10 +657,13 @@ class _Run:
         *,
         share: float | None = None,
         cents: int | None = None,
+        target_cents: int | None = None,
     ) -> Callable[[], None]:
         def run() -> None:
             amount = cents
-            if amount is None:
+            if amount is None and target_cents is not None:
+                amount = max(1, min(target_cents, self.ledger.available_balance(victim.id)))
+            elif amount is None:
                 amount = max(1, int(self.ledger.available_balance(victim.id) * share))
             assessment, uetr, ignored = self.instant_payment(
                 victim, mule, typed, amount, Actor.VICTIM, (case_id, "victim")

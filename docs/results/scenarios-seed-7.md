@@ -22,9 +22,9 @@ evidence about real fraud, real detection rates or real recovery rates.
 | Normal payments blocked | 0 | 0 | 0 | 0 |
 | Normal payments held back by the receiving bank | 0 | 0 | 0 | 6 |
 | Normal payments refused by the bank | 38 | 23 | 23 | 21 |
-| Assessment time p50 | n/a | 0.87 ms | 0.88 ms | 0.87 ms |
-| Assessment time p95 | n/a | 1.14 ms | 1.17 ms | 1.10 ms |
-| Assessment time p99 | n/a | 1.31 ms | 1.35 ms | 1.25 ms |
+| Assessment time p50 | n/a | 0.88 ms | 0.88 ms | 0.88 ms |
+| Assessment time p95 | n/a | 1.13 ms | 1.13 ms | 1.13 ms |
+| Assessment time p99 | n/a | 1.28 ms | 1.31 ms | 1.32 ms |
 | Ledger invariants hold | yes | yes | yes | yes |
 
 Recovered money is what holds stopped along the traced path after the victim's report,
@@ -57,6 +57,69 @@ Minimum / median / maximum over the seeds, for each policy.
 | Victims bear under BR_MED, share of attempted | 49.3% / 63.0% / 82.7% | 6.9% / 17.8% / 32.5% | 0.0% / 6.5% / 18.7% | 0.0% / 0.8% / 10.4% |
 
 Ledger invariants held in every run: yes.
+
+## At the real fraud rate
+
+In this simulation about 24 of 823 payments are scams. In the EU/EEA in 2024, fraudulent credit transfers were 0.002% of all credit transfers by number (EBA and ECB, 2025 Report on payment fraud (published December 2025, data for 2024), page 15), about one in 49,999. If the share of normal payments flagged here carried over to real payments, each scam payment would come with this many flagged normal payments:
+
+| Policy | Normal payments flagged | Flagged normal payments per scam payment at the real rate |
+|---|---|---|
+| NONE | 0.00% | 0 |
+| SENDER_ONLY | 7.38% | 3,692 |
+| SENDER_AND_RECEIVER | 7.38% | 3,692 |
+| FULL_CHAIN | 8.14% | 4,068 |
+
+Flagged means warned or blocked by the sending bank, or held back by the receiving bank.
+This is an order of magnitude. The real rate covers every kind of credit-transfer fraud and
+every credit transfer, and the simulated flag rate depends on assumed habits of normal
+customers.
+
+## Sensitivity: scam amounts around EUR 2,155, seeds 1–10
+
+Minimum / median / maximum over the seeds, for each policy.
+
+Scam amounts drawn between half and one and a half times the EBA-ECB average value
+of a fraudulent credit transfer (the shape of that distribution is an assumption).
+Every other setting is unchanged.
+
+| | NONE | SENDER_ONLY | SENDER_AND_RECEIVER | FULL_CHAIN |
+|---|---|---|---|---|
+| Lost after recovery along the traced path, share of attempted | 42.5% / 61.1% / 75.8% | 14.6% / 25.4% / 35.7% | 0.0% / 11.1% / 20.3% | 0.0% / 0.3% / 7.3% |
+| Prevented, share of attempted | 0.0% / 0.0% / 0.0% | 49.3% / 61.5% / 77.0% | 49.3% / 61.5% / 77.0% | 75.1% / 86.1% / 95.5% |
+| Recovered along the traced path, share of attempted | 24.2% / 38.9% / 57.5% | 4.2% / 9.6% / 26.1% | 15.6% / 28.9% / 39.3% | 0.7% / 12.5% / 24.9% |
+| Normal payments warned or blocked | 0.0% / 0.0% / 0.0% | 3.1% / 5.3% / 7.4% | 3.1% / 5.3% / 7.4% | 3.1% / 5.3% / 7.4% |
+| Normal payments held back by the receiving bank | 0.0% / 0.0% / 0.0% | 0.0% / 0.0% / 0.0% | 0.0% / 0.0% / 0.0% | 0.6% / 0.7% / 0.8% |
+| Victims bear under UK_PSR, share of attempted | 4.9% / 25.7% / 34.9% | 1.0% / 8.3% / 12.7% | 0.0% / 0.9% / 5.8% | 0.0% / 0.1% / 0.5% |
+| Banks bear under UK_PSR, share of attempted | 40.8% / 52.5% / 79.7% | 12.5% / 20.2% / 26.4% | 0.0% / 7.6% / 19.2% | 0.0% / 0.1% / 6.9% |
+| Victims bear under EU_PSR_PROVISIONAL, share of attempted | 0.0% / 0.0% / 0.0% | 0.0% / 0.0% / 0.0% | 0.0% / 0.0% / 0.0% | 0.0% / 0.0% / 0.0% |
+| Banks bear under EU_PSR_PROVISIONAL, share of attempted | 64.9% / 73.6% / 84.6% | 14.7% / 25.4% / 35.7% | 0.0% / 11.1% / 20.3% | 0.0% / 0.3% / 7.4% |
+| Victims bear under NO_REFUND, share of attempted | 64.9% / 73.6% / 84.6% | 14.7% / 25.4% / 35.7% | 0.0% / 11.1% / 20.3% | 0.0% / 0.3% / 7.4% |
+| Victims bear under BR_MED, share of attempted | 42.5% / 61.1% / 75.8% | 14.6% / 25.4% / 35.7% | 0.0% / 11.1% / 20.3% | 0.0% / 0.3% / 7.3% |
+
+Ledger invariants held in every run: yes.
+
+## UK regime compared with the PSR dashboard
+
+Real figures (Payment Systems Regulator, APP scams reimbursement dashboard for Q1 2026): 88% of the money lost to APP
+scams was reimbursed, and 3% of claims were rejected because the customer
+did not take enough care. Simulated, over claims whose victim type the UK rules cover:
+
+| Policy | Claims in scope | Reimbursed share | Rejected for lack of care | Same, if ignoring a warning counted as gross negligence |
+|---|---|---|---|---|
+| NONE | 18 | 97% | 0% | 0% |
+| SENDER_ONLY | 6 | 97% | 0% | 83% |
+| SENDER_AND_RECEIVER | 6 | 97% | 0% | 83% |
+| FULL_CHAIN | 2 | 97% | 0% | 100% |
+
+The simulated share is higher because the model refunds every in-scope claim except the
+excess and never rejects one for lack of care unless the sensitivity switch is on. The
+dashboard does not define its denominator in exactly these terms, so the two shares are
+not strictly comparable. The comparison shows what the model leaves out; nothing is tuned
+to match it.
+With the switch on, up to 100% of in-scope claims are rejected here, against the
+3% the PSR reports. That argues against reading an ignored warning as
+gross negligence.
+
 
 ## Cases under NONE
 
@@ -239,6 +302,17 @@ the receiving-bank variants.
 
 Settings used: `sending_psp_applies_excess=True`, `victims_report_to_police_and_psp=True`, `impersonation_via_bank_channels=True`, `receiving_banks_monitor_incoming=False`, `ignored_warning_is_gross_negligence=False`.
 
+## Reference figures
+
+| Figure | Value | Source | Where |
+|---|---|---|---|
+| Fraudulent credit transfers as a share of all credit transfers, by number | 0.002% | [EBA and ECB, 2025 Report on payment fraud (published December 2025, data for 2024)](https://www.eba.europa.eu/sites/default/files/2025-12/1709846a-84d9-47cf-86a0-b155efb34d66/EBA%20and%20ECB%20Report%20on%20Payment%20Fraud.pdf) | page 15 |
+| Fraudulent credit transfers as a share of all credit transfers, by value | 0.001% | [EBA and ECB, 2025 Report on payment fraud (published December 2025, data for 2024)](https://www.eba.europa.eu/sites/default/files/2025-12/1709846a-84d9-47cf-86a0-b155efb34d66/EBA%20and%20ECB%20Report%20on%20Payment%20Fraud.pdf) | page 6 |
+| Average value of a fraudulent credit transfer | 2,155 EUR | [EBA and ECB, 2025 Report on payment fraud (published December 2025, data for 2024)](https://www.eba.europa.eu/sites/default/files/2025-12/1709846a-84d9-47cf-86a0-b155efb34d66/EBA%20and%20ECB%20Report%20on%20Payment%20Fraud.pdf) | page 15 |
+| Share of credit-transfer fraud losses borne by payment service users | 85% | [EBA and ECB, 2025 Report on payment fraud (published December 2025, data for 2024)](https://www.eba.europa.eu/sites/default/files/2025-12/1709846a-84d9-47cf-86a0-b155efb34d66/EBA%20and%20ECB%20Report%20on%20Payment%20Fraud.pdf) | page 7 ('around 85%') |
+| Share of money lost to APP scams that was reimbursed | 88% | [Payment Systems Regulator, APP scams reimbursement dashboard for Q1 2026](https://www.psr.org.uk/information-for-consumers/app-scams-reimbursement-dashboard/) | 18-month summary (GBP 316m) |
+| Share of claims rejected because the customer did not take enough care | 3% | [Payment Systems Regulator, APP scams reimbursement dashboard for Q1 2026](https://www.psr.org.uk/information-for-consumers/app-scams-reimbursement-dashboard/) | 18-month summary |
+
 ## Assumptions (ScenarioConfig)
 
 | Setting | Value |
@@ -269,6 +343,7 @@ Settings used: `sending_psp_applies_excess=True`, `victims_report_to_police_and_
 | `p_typo` | 0.04 |
 | `p_trading_name` | 0.05 |
 | `new_account_gifts` | 6 |
+| `scam_amount_mean_cents` | None |
 
 ## Risk rules (RiskConfig)
 

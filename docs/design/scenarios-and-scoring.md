@@ -79,6 +79,34 @@ member's account opened during the measured period. Under `FULL_CHAIN` the incom
 holds these back, and the results file counts them as normal payments held back by the
 receiving bank.
 
+## Calibration against real figures
+
+No public transaction-level dataset of real APP scams or SEPA Instant fraud was found
+(searched in November 2026). The public fraud datasets are either real but about other fraud
+(the ULB credit-card set: card payments from September 2013, anonymised features) or
+synthetic (PaySim, IBM AML, SAML-D, Feedzai's Bank Account Fraud suite). Adding them would not
+make the results less synthetic. Real figures exist only as aggregates, and
+`echtzeit/calibration.py` holds the ones used, each with its source and page:
+
+- EBA and ECB, 2025 Report on payment fraud (data for 2024): fraudulent credit transfers were
+  0.002% of all credit transfers by number (page 15) and 0.001% by value (page 6). The average
+  fraudulent credit transfer was EUR 2,155 (page 15). Users bore around 85% of credit-transfer
+  fraud losses (page 7).
+- Payment Systems Regulator, APP scams reimbursement dashboard (7 October 2024 to 31 March
+  2026): 88% of the money lost to APP scams was reimbursed, and 3% of claims were rejected for
+  lack of care.
+
+The results file uses them in three ways:
+
+1. At the real fraud rate. About 3% of simulated payments are scams, against about one in
+   50,000 credit transfers in reality. The share of normal payments flagged is converted into
+   flagged normal payments per scam payment at the real rate. This is an order of magnitude:
+   the real rate covers all credit-transfer fraud and all credit transfers.
+2. Amount sensitivity. A second spread over the same seeds draws scam amounts between half and
+   one and a half times EUR 2,155. The shape of that distribution is an assumption.
+3. UK check. The simulated UK regime is set against the PSR dashboard. Nothing is tuned to
+   match it; the gap shows what the model leaves out.
+
 ## How the simulation keeps the comparison fair
 
 - One seeded generator builds the population and the schedule before anything runs, so every
