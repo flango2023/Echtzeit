@@ -53,11 +53,16 @@ choose one of two rules (there is no default):
 
 | Rule | A debit is taken from | Effect |
 |---|---|---|
-| `OWN_FUNDS_FIRST` | other money first, traced money only when other money is exhausted | Most traced money stays on accounts. Upper bound for what can be frozen. |
-| `TRACED_FUNDS_FIRST` | traced money first | Least traced money stays. Lower bound for what can be frozen. |
+| `OWN_FUNDS_FIRST` | other money first, traced money only when other money is exhausted | Usually leaves the most traced money on accounts. |
+| `TRACED_FUNDS_FIRST` | traced money first | Usually leaves the least. |
 
-These are two bounds for an estimate. They are not legal tracing doctrines, and no claim is
-made about which one a court or a bank would apply. A report should show both.
+Both rules are greedy: they decide debit by debit. For a single debit they bracket the result,
+but over several debits they are not guaranteed bounds. Example: an account holds 100 traced and
+100 other money, then pays 100 to customer B and 100 to a system account. `OWN_FUNDS_FIRST`
+sends the traced 100 to the system account, so nothing can be frozen; `TRACED_FUNDS_FIRST`
+sends it to B, where 100 can be frozen. The two results are two estimates, not an interval
+that must contain the truth. They are not legal tracing doctrines, and no claim is made about
+which one a court or a bank would apply. A report should show both.
 
 Holds take part in the replay. A hold stops money whatever its tag, so the ledger never lets
 held money move. The attribution question is only which pool a hold stops first: holds
@@ -98,7 +103,7 @@ money might be frozen. The safe choice for avoiding wrongful freezes is
 
 ## Limits
 
-- The two-pool model gives bounds, not the truth.
+- The two-pool model gives two estimates, not bounds and not the truth.
 - Each trace replays every transfer after the payment. That is fine for a simulator and too
   slow for a large ledger, which would need an index of hops or a stored running state.
 - The depth limit (default 5) is a setting of this simulator.

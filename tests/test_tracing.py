@@ -81,7 +81,8 @@ def test_the_two_rules_give_an_upper_and_a_lower_bound_on_mixed_money(ledger, ne
     assert upper.root.remaining_cents == 800 and by_account(upper)[m2].traced_in_cents == 200
     assert lower.root.remaining_cents == 300 and by_account(lower)[m2].traced_in_cents == 700
     assert upper.root.remaining_cents >= lower.root.remaining_cents
-    assert_conserved(upper) and assert_conserved(lower)
+    assert_conserved(upper)
+    assert_conserved(lower)
 
 
 def test_a_credit_that_is_only_partly_traced_leaves_the_rest_as_other_money(ledger, net):
@@ -98,7 +99,8 @@ def test_a_credit_that_is_only_partly_traced_leaves_the_rest_as_other_money(ledg
 
     assert by_account(upper)[m3].traced_in_cents == 200  # m2 spent its 500 of other money first
     assert by_account(lower)[m3].traced_in_cents == 700
-    assert_conserved(upper) and assert_conserved(lower)
+    assert_conserved(upper)
+    assert_conserved(lower)
 
 
 def test_two_arrivals_on_one_account_are_not_counted_twice(ledger, net):

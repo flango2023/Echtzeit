@@ -340,3 +340,28 @@ def test_pacs008_parse_accepts_only_plain_decimal_amounts(transfer, amount):
         pacs008.parse(xml)
     assert time.perf_counter() - started < 1.0
     assert amount not in str(caught.value)  # the submitted value is not echoed
+
+
+def test_identifiers_refuse_a_trailing_newline_and_a_short_german_iban():
+    iban, uetr = make_german_iban("42"), new_uetr()
+    assert iban_is_valid(iban) and bic_is_valid(FICTIONAL_BIC) and uetr_is_valid(uetr)
+    assert not iban_is_valid(iban + "\n")
+    assert not bic_is_valid(FICTIONAL_BIC + "\n")
+    assert not uetr_is_valid(uetr + "\n")
+    # A German IBAN with a 13-character BBAN and correct check digits: too short for Germany.
+    from echtzeit.iso20022.identifiers import _mod97
+
+    bban = "1234567890123"
+    short = f"DE{98 - _mod97(bban + 'DE00'):02d}{bban}"
+    assert _mod97(short[4:] + short[:4]) == 1 and not iban_is_valid(short)
+
+
+def test_pacs008_errors_do_not_echo_the_submitted_values(transfer):
+    xml = pacs008.build(transfer)
+    for old, new in (
+        ("<SttlmMtd>CLRG</SttlmMtd>", "<SttlmMtd>SECRET1</SttlmMtd>"),
+        ("<Cd>SEPA</Cd>", "<Cd>SECRET2</Cd>"),
+    ):
+        with pytest.raises(MessageError) as caught:
+            pacs008.parse(_tamper(xml, old, new))
+        assert "SECRET" not in str(caught.value)

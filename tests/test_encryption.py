@@ -70,11 +70,21 @@ def test_key_files_that_are_open_missing_or_malformed_are_refused(tmp_path):
 
 def test_only_hex_keys_reach_the_pragma():
     assert validate_key(KEY.upper()) == KEY
-    injection = "00" * 30 + "'\"; "
-    with pytest.raises(DbKeyError):
-        validate_key(injection)
-    with pytest.raises(DbKeyError):
-        make_engine("sqlite:///unused.db", key=injection)
+    # 64 characters each, so only the character check can refuse them.
+    for bad in ("'\"; --" + "0" * 58, "ab" * 30 + "  " + "cd", "0x" + "ab" * 31):
+        assert len(bad) == 64
+        with pytest.raises(DbKeyError):
+            validate_key(bad)
+        with pytest.raises(DbKeyError):
+            make_engine("sqlite:///unused.db", key=bad)
+
+
+def test_a_key_file_that_is_not_ascii_is_refused(tmp_path):
+    path = tmp_path / "db.key"
+    path.write_bytes(b"\xff" * 64)
+    os.chmod(path, 0o600)
+    with pytest.raises(DbKeyError, match="ASCII"):
+        load_key_file(path)
 
 
 # -- encrypted database ----------------------------------------------------------------------

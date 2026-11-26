@@ -29,8 +29,10 @@ DEFAULT_MAX_DEPTH = 5
 class Attribution(Enum):
     """Which money a debit uses when an account holds both traced and other money."""
 
-    OWN_FUNDS_FIRST = "OWN_FUNDS_FIRST"  # other money first: most traced money stays (upper bound)
-    TRACED_FUNDS_FIRST = "TRACED_FUNDS_FIRST"  # traced money first: least stays (lower bound)
+    # Two greedy rules, applied debit by debit. They usually bracket the result, but are not
+    # guaranteed bounds: across several debits either one can leave more traced money.
+    OWN_FUNDS_FIRST = "OWN_FUNDS_FIRST"  # other money first
+    TRACED_FUNDS_FIRST = "TRACED_FUNDS_FIRST"  # traced money first
 
 
 @dataclass(frozen=True)

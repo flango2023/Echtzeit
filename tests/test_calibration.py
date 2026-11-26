@@ -37,6 +37,11 @@ def test_invalid_rates_are_refused(rate):
     with pytest.raises(ValueError):
         calibration.normal_payments_per_scam(rate)
     with pytest.raises(ValueError):
+        calibration.flagged_per_scam_at_real_rate(0.5, rate)
+
+
+def test_flag_shares_outside_zero_to_one_are_refused():
+    with pytest.raises(ValueError):
         calibration.flagged_per_scam_at_real_rate(1.5)
 
 
@@ -95,12 +100,15 @@ def test_calibrated_amounts_stay_within_their_bounds():
     assert result.invariants_ok
 
 
-def test_uncalibrated_runs_are_unchanged_by_the_setting():
+def test_uncalibrated_runs_keep_their_recorded_amounts():
+    """Golden values: without a calibrated mean, scam amounts stay as they were recorded.
+
+    If a deliberate model change moves them, update the numbers and regenerate the results.
+    """
+    assert SMALL.scam_amount_mean_cents is None
     plain = simulate(Policy.NONE, SMALL)
-    explicit = simulate(
-        Policy.NONE, ScenarioConfig(**{**SMALL.__dict__, "scam_amount_mean_cents": None})
-    )
-    assert [c.attempted_cents for c in plain.cases] == [c.attempted_cents for c in explicit.cases]
+    amounts = [c.attempted_cents for c in plain.cases]
+    assert (len(amounts), sum(amounts), plain.legit.payments) == (8, 3_590_066, 101)
 
 
 def test_the_report_shows_the_real_rate_the_uk_check_and_the_sources():
@@ -114,7 +122,7 @@ def test_the_report_shows_the_real_rate_the_uk_check_and_the_sources():
         ]
     }
     text = render(results, None, calibrated)
-    assert "## At the real fraud rate" in text and "about one in 49,999" in text
+    assert "## At the real fraud rate" in text and "about one in 50,000" in text
     assert "0.002% of all credit transfers by number" in text
     for result in results:
         expected = calibration.flagged_per_scam_at_real_rate(flagged_share(result))

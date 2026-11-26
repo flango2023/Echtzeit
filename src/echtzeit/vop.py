@@ -42,12 +42,20 @@ class VopResult:
     suggested_name: str | None = None  # the holder's name, only for a close match
 
 
+# Latin letters that Unicode does not decompose into a base letter and an accent.
+_LATIN_FOLDS = str.maketrans({"ø": "o", "ł": "l", "đ": "d", "æ": "ae", "œ": "oe", "þ": "th"})
+
+
 def normalise(name: str) -> str:
-    decomposed = unicodedata.normalize("NFKD", name)
-    without_accents = "".join(char for char in decomposed if not unicodedata.combining(char))
-    folded = without_accents.casefold()
-    cleaned = "".join(char if char.isalnum() else " " for char in folded)
-    return " ".join(sorted(cleaned.split()))
+    """Case-fold, drop accents on Latin letters, keep the marks other scripts need."""
+    text = unicodedata.normalize("NFKD", name.casefold()).translate(_LATIN_FOLDS)
+    kept: list[str] = []
+    for char in text:
+        if unicodedata.combining(char) and kept and kept[-1].isascii():
+            continue  # an accent on a Latin letter
+        is_mark = unicodedata.category(char).startswith("M")  # e.g. Devanagari vowel signs
+        kept.append(char if char.isalnum() or is_mark else " ")
+    return " ".join(sorted("".join(kept).split()))
 
 
 def compare_names(typed: str, holder: str) -> tuple[VopOutcome, float]:

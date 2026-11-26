@@ -175,7 +175,7 @@ def parse(xml: bytes | str) -> CreditTransfer:
     def expect(path: str, allowed: str) -> None:
         value = _xml.text_of(root, path, ns)
         if value != allowed:
-            problems.append(f"{path.replace('p:', '')} must be {allowed!r}, found {value!r}")
+            problems.append(f"{path.replace('p:', '')} must be {allowed!r}")
 
     base = "p:FIToFICstmrCdtTrf/"
     hdr = base + "p:GrpHdr/"
@@ -186,7 +186,7 @@ def parse(xml: bytes | str) -> CreditTransfer:
     expect(hdr + "p:NbOfTxs", "1")
     method = _xml.text_of(root, hdr + "p:SttlmInf/p:SttlmMtd", ns)
     if method not in ("CLRG", "INGA", "INDA"):
-        problems.append(f"SttlmMtd must be CLRG, INGA or INDA, found {method!r}")
+        problems.append("SttlmMtd must be CLRG, INGA or INDA")
     expect(hdr + "p:PmtTpInf/p:SvcLvl/p:Cd", "SEPA")
     expect(hdr + "p:PmtTpInf/p:LclInstrm/p:Cd", "INST")
     settlement_raw = need(hdr + "p:IntrBkSttlmDt")

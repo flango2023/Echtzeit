@@ -19,6 +19,7 @@ Rules:
 import argparse
 import ipaddress
 import os
+import ssl
 import stat
 from dataclasses import dataclass
 from pathlib import Path
@@ -79,6 +80,12 @@ def check_config(
                 f"TLS private key {tls_key} is accessible by group or others; "
                 f"run: chmod 600 {tls_key}"
             )
+        try:
+            ssl.create_default_context(ssl.Purpose.CLIENT_AUTH).load_cert_chain(tls_cert, tls_key)
+        except (ssl.SSLError, OSError) as exc:
+            raise ServeConfigError(
+                f"TLS certificate and key do not load as a pair: {exc}"
+            ) from None
     if db_key_file is None and not is_loopback(host):
         raise ServeConfigError(
             f"refusing to listen on {host} with an unencrypted database; give --db-key-file "
@@ -121,6 +128,7 @@ def main(argv: list[str] | None = None) -> None:
         ssl_certfile=str(config.tls_cert) if config.tls else None,
         ssl_keyfile=str(config.tls_key) if config.tls else None,
         server_header=False,
+        access_log=False,  # its lines would contain request paths, and so IBANs
         proxy_headers=False,
     )
 

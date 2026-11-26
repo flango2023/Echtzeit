@@ -96,6 +96,8 @@ class RiskScorer:
         amount_cents: int,
         at: datetime,
     ) -> Assessment:
+        if isinstance(amount_cents, bool) or not isinstance(amount_cents, int) or amount_cents <= 0:
+            raise ValueError("amount_cents must be a positive whole number")
         started = time.perf_counter_ns()
         cfg = self.config
         vop = verify_payee(self._ledger, creditor_iban, typed_name)

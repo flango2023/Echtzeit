@@ -11,7 +11,7 @@ period the operator sets (`echtzeit.retention`), and the database can be encrypt
 
 from collections import Counter
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import UTC, datetime
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session, sessionmaker
@@ -129,7 +129,7 @@ class AuditLog:
         with self._sessions() as session, session.begin():
             return [
                 {
-                    "at": row.at.isoformat(),
+                    "at": row.at.replace(tzinfo=UTC).isoformat(),
                     "request_id": row.request_id,
                     "client_id": row.client_id,
                     "key_id": row.key_id,

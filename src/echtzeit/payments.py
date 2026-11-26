@@ -123,7 +123,7 @@ class InstantPaymentProcessor:
         if completed is not None:
             return self._accept(message, key, now, completed)
 
-        if now - message.accepted_at > self._timeout:
+        if abs(now - message.accepted_at) > self._timeout:  # too old, or dated in the future
             return self._reject(message, key, now, TIMEOUT)
 
         if self._incoming_screen is not None and self._incoming_screen(message, creditor, now):
@@ -162,9 +162,9 @@ class InstantPaymentProcessor:
     def _report(
         message: pacs008.CreditTransfer, key: str, now: datetime, *, reason_code: str | None
     ) -> pacs002.StatusReport:
-        # The outcome is part of the id seed: the same outcome for the same payment always gets
-        # the same ids, while a later different outcome (rejected, then accepted) does not reuse them.
-        seed = f"{key}|{reason_code or pacs002.ACCEPTED}"
+        # The message id and the outcome are part of the id seed: a repeated message gets the same
+        # ids, while a resend under a new MsgId or a later different outcome gets new ones.
+        seed = f"{key}|{message.msg_id}|{reason_code or pacs002.ACCEPTED}"
         return pacs002.report_for(
             message,
             msg_id=_derived_id("RPT", seed),

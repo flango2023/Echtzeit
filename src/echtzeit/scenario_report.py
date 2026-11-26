@@ -114,7 +114,6 @@ def flagged_share(result: SimulationResult) -> float:
 
 def render_real_rate(results: list[SimulationResult]) -> list[str]:
     rate = calibration.CT_FRAUD_RATE_BY_NUMBER
-    per_scam = calibration.normal_payments_per_scam(rate.value)
     lines = [
         "## At the real fraud rate",
         "",
@@ -122,7 +121,7 @@ def render_real_rate(results: list[SimulationResult]) -> list[str]:
             f"In this simulation about {len(results[0].cases)} of {results[0].legit.payments + len(results[0].cases)} "
             "payments are scams. In the EU/EEA in 2024, fraudulent credit transfers were "
             f"{rate.value * 100:.3f}% of all credit transfers by number ({rate.source.title}, {rate.where}), "
-            f"about one in {per_scam:,.0f}. If the share of normal payments flagged here carried over to real "
+            f"about one in {1 / rate.value:,.0f}. If the share of normal payments flagged here carried over to real "
             "payments, each scam payment would come with this many flagged normal payments:"
         ),
         "",

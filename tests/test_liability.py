@@ -227,9 +227,21 @@ def test_every_allocation_shares_exactly_the_unrecovered_loss():
         ("CONSUMER", "MICROENTERPRISE", "OTHER_BUSINESS"),
         ("SAFE_ACCOUNT", "INVOICE_IBAN_CHANGE"),
     ):
-        for recovered in {0, 1, paid // 3, paid - 1, paid}:
+        for recovered, (decision, screened) in itertools.product(
+            {0, 1, paid // 3, paid - 1, paid},
+            # Every EU branch: no score, art. 68(2) suspicion, art. 87(3) on or off.
+            [(None, False), ("ALLOW", True), ("WARN", False), ("WARN", True), ("BLOCK", True)],
+        ):
             c = case(
-                attempted_cents=paid, recovered_cents=recovered, victim_type=victim_type, kind=kind
+                attempted_cents=paid,
+                recovered_cents=recovered,
+                victim_type=victim_type,
+                kind=kind,
+                decision=decision,
+                points=None if decision is None else 50,
+                reasons=[] if decision is None else ["FRESH_RECEIVER"],
+                warned_and_ignored=decision == "WARN",
+                receiver_screened=screened,
             )
             a = allocate(c, regime, Assumptions(sending_psp_applies_excess=excess))
             assert sum(parts(a)) == paid - recovered == a.loss_cents
@@ -249,7 +261,7 @@ def test_totals_add_up_over_cases():
 
 
 def test_every_regime_that_moves_money_cites_primary_sources():
-    for regime in (UK_PSR, EU_PSR_PROVISIONAL):
+    for regime in (UK_PSR, EU_PSR_PROVISIONAL, BR_MED):
         assert regime.sources
         assert any(source.primary for source in regime.sources)
         assert all(source.url.startswith("https://") for source in regime.sources)

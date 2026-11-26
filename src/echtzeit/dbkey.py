@@ -19,6 +19,7 @@ the database file.
 
 import argparse
 import os
+import re
 import secrets
 import stat
 from pathlib import Path
@@ -33,12 +34,8 @@ class DbKeyError(Exception):
 def validate_key(key: str) -> str:
     """Return the key in lower case if it is exactly 64 hex characters, else raise."""
     key = key.strip()
-    if len(key) != KEY_HEX_LENGTH:
-        raise DbKeyError(f"a database key must be {KEY_HEX_LENGTH} hex characters")
-    try:
-        bytes.fromhex(key)
-    except ValueError:
-        raise DbKeyError("a database key may contain only hex characters 0-9 and a-f") from None
+    if not re.fullmatch(f"[0-9a-fA-F]{{{KEY_HEX_LENGTH}}}", key):
+        raise DbKeyError(f"a database key must be {KEY_HEX_LENGTH} hex characters 0-9 and a-f")
     return key.lower()
 
 
@@ -50,7 +47,11 @@ def load_key_file(path: str | Path) -> str:
         raise DbKeyError(
             f"database key file {path} is accessible by group or others; run: chmod 600 {path}"
         )
-    return validate_key(path.read_text(encoding="ascii"))
+    try:
+        text = path.read_text(encoding="ascii")
+    except (OSError, UnicodeDecodeError):
+        raise DbKeyError(f"database key file {path} cannot be read as ASCII text") from None
+    return validate_key(text)
 
 
 def write_new_key(path: str | Path) -> None:

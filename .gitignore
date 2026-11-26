@@ -35,3 +35,6 @@ dist/
 keys*.json
 # Database encryption keys (never commit)
 *.key
+# TLS certificates and keys, and leftovers of an interrupted key-file write
+*.pem
+keys*.json.tmp

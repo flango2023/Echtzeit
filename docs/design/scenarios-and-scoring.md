@@ -66,7 +66,9 @@ system has a flaw, section 2, page 17), but the value used is not measured.
 | `LARGE_FIRST_CREDIT` | the amount is at least €1,000 and more than 3 times any earlier payment to the account | 20 |
 
 A payment is held back at 45 points, but only if a rule other than `NAME_MISMATCH` fired: EU
-art. 73(3) does not allow the decision to rest solely on the payee-name check. The points
+art. 73(3) does not allow the decision to rest solely on the payee-name check. The name check
+can still decide in combination: `FIRST_CREDIT` alone (25) is not held back, `FIRST_CREDIT` with
+`NAME_MISMATCH` (55) is. The points
 and the threshold are this project's choices and are not calibrated. The EPC lists no reason
 code for "held back as suspected fraud", so `RR04` (regulatory reason) is used; that is also
 this project's choice.

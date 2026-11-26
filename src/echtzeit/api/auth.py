@@ -191,12 +191,12 @@ class KeyStore:
         path = Path(path)
         return cls(_load_file(path), path=path, **kwargs)  # checks the file mode too
 
-    def _file_signature(self) -> tuple[int, int, int] | None:
+    def _file_signature(self) -> tuple[int, int, int, int] | None:
         try:
             info = self._path.stat()
         except OSError:
             return None
-        return (info.st_mtime_ns, info.st_size, info.st_ino)
+        return (info.st_mtime_ns, info.st_size, info.st_ino, info.st_mode)
 
     def _refresh(self) -> None:
         """Re-read the key file if it changed. An invalid file refuses every key."""

@@ -68,9 +68,7 @@ def test_a_purge_deletes_only_rows_older_than_the_period(engine, sessions, audit
     done = {r.table_name: r for r in purge(sessions)}
     assert done["api_requests"].rows == 3 and not done["api_requests"].dry_run
     assert done["rejected_payments"].keep_days is None
-    kept = sorted(
-        (NOW.replace(tzinfo=None) - datetime.fromisoformat(r["at"])).days for r in audit.requests()
-    )
+    kept = sorted((NOW - datetime.fromisoformat(r["at"])).days for r in audit.requests())
     assert kept == [0, 30, 89]
 
     (run,) = runs(sessions)

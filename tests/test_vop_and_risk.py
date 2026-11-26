@@ -268,3 +268,49 @@ def test_system_funding_does_not_count_as_an_earlier_customer_payment(ledger, wo
     )
 
     assert result.fired("FIRST_CREDIT")
+
+
+@pytest.mark.parametrize(
+    ("typed", "holder", "outcome"),
+    [
+        ("Søren Ørsted", "Soren Orsted", VopOutcome.MATCH),  # letters with a stroke
+        ("Łukasz Wałęsa", "Lukasz Walesa", VopOutcome.MATCH),
+        ("Ærø Œuvre", "Aero Oeuvre", VopOutcome.MATCH),
+        ("सीता", "सुता", VopOutcome.NO_MATCH),  # vowel signs are part of the name
+        ("が", "か", VopOutcome.NO_MATCH),  # so is the Japanese voicing mark
+        ("Jose\u0301", "José", VopOutcome.MATCH),  # decomposed and composed accent
+    ],
+)
+def test_names_in_other_letters_and_scripts(typed, holder, outcome):
+    assert compare_names(typed, holder)[0] is outcome
+
+
+@pytest.mark.parametrize("amount", [0, -1, True, 1.5])
+def test_the_scorer_refuses_amounts_that_are_not_positive_cents(ledger, world, amount):
+    account, _ = world
+    alice, _ = account("Alice", 500_000)
+    _, shop_iban = account("Shop")
+    with pytest.raises(ValueError):
+        RiskScorer(ledger).assess(
+            debtor_id=alice, creditor_iban=shop_iban, typed_name="Shop", amount_cents=amount, at=T
+        )
+
+
+@pytest.mark.parametrize(
+    ("warn_at", "block_at", "decision"),
+    [
+        (36, 70, Decision.ALLOW),
+        (35, 70, Decision.WARN),
+        (10, 36, Decision.WARN),
+        (10, 35, Decision.BLOCK),
+    ],
+)
+def test_thresholds_are_inclusive(ledger, world, warn_at, block_at, decision):
+    account, _ = world
+    alice, _ = account("Alice", 500_000)
+    _, shop_iban = account("Shop")
+    scorer = RiskScorer(ledger, RiskConfig(warn_at=warn_at, block_at=block_at))
+    result = scorer.assess(
+        debtor_id=alice, creditor_iban=shop_iban, typed_name="Shop", amount_cents=1_000, at=T
+    )
+    assert (result.points, result.decision) == (35, decision)

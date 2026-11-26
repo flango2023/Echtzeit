@@ -244,7 +244,11 @@ Ledger and database:
 
 - The database is SQLite, which allows one writer at a time. The concurrency tests show the
   ledger rules hold when requests overlap. They do not show how the code behaves with
-  PostgreSQL row locks, and tracing relies on writers being serialized.
+  PostgreSQL row locks, and tracing relies on writers being serialized. Reads also start with
+  `BEGIN IMMEDIATE`, so a long trace makes writers wait.
+- The append-only and retention triggers are created with their tables. A database whose
+  triggers were dropped does not get them back from `init_db`. Changes to a retention period
+  are not logged; only purges are.
 - There are no migrations. Delete any database file created by an earlier version. A database
   created before the retention tool refuses every purge.
 - The audit log and the request log can be purged after a period the operator sets. They have
@@ -270,8 +274,14 @@ ISO 20022 and processing:
   funds. Using `MS03` for the latter is this project's choice.
 - The processor does not compare the creditor name with the account holder. Verification of
   Payee runs on the sending side before the message is built, as in the EPC scheme.
-- The 10-second limit is measured against the processor's clock. Network delay and clock skew
-  are not modelled.
+- The 10-second limit is measured against the processor's clock, in both directions: a message
+  dated more than 10 seconds in the future is refused like a late one (`AB05`). Network delay
+  and clock skew are not modelled.
+- IBANs pass if they have the general format and the mod-97 check digits. The length per
+  country is checked only for Germany (22 characters), the country of every generated IBAN.
+- The payee-name comparison drops accents on Latin letters and folds ø, ł, đ, æ, œ and þ. Marks
+  that other scripts need, such as Devanagari vowel signs, are kept. Transliteration between
+  scripts is not attempted.
 - The ISO XSD files are not stored here. Four tests validate output against them and are
   skipped when the files are missing. To run them, download `pacs.008.001.08.xsd` and
   `pacs.002.001.10.xsd` from the ISO 20022 message definitions (https://www.iso20022.org) and
@@ -279,8 +289,9 @@ ISO 20022 and processing:
 
 Holds and tracing:
 
-- Mixed money cannot be attributed exactly. Two rules give an upper and a lower bound. They
-  are not legal tracing rules.
+- Mixed money cannot be attributed exactly. Two greedy rules give two estimates. They usually
+  bracket the result but are not guaranteed bounds, and they are not legal tracing rules
+  (example in [holds-and-tracing.md](docs/design/holds-and-tracing.md)).
 - Direct Python calls to the ledger do not check who places or releases a hold; `placed_by`
   is a free-text label there. The HTTP API takes it from the key and lets a bank hold only its
   own accounts.
@@ -299,8 +310,13 @@ Scenarios, scoring and liability:
   ECB exchange rate. The EU regime follows the Council's position at first reading, which is
   not in force and may still change. Its "objectively justified reasons to suspect fraud" are
   not defined in numbers, so mapping them to risk rules is this project's interpretation.
-  Only `BR_MED` counts recovery along the traced path. The other regimes count only the first receiving account, which
-  understates what cooperating banks may recover. Claim deadlines, vulnerability assessments
+  Only `BR_MED` counts recovery along the traced path. The other regimes count only the first
+  receiving account, which understates what cooperating banks may recover.
+- The victim and the first mule are given banks independently, so about a third of executed
+  scam payments are between two accounts of the same bank (78 of 240 with policy `NONE`, seeds 1
+  to 10).
+  The liability tables still split such a case between a sending and a receiving role, so
+  "sending PSP" and "receiving PSP" are roles, not necessarily two institutions. Claim deadlines, vulnerability assessments
   and several other rules are not modelled. The list is in
   [liability.md](docs/design/liability.md).
 
@@ -308,7 +324,12 @@ HTTP API:
 
 - TLS needs a certificate you provide. The minimum TLS 1.2 comes from Python's defaults,
   checked on 25 November 2026, and is not set by the code.
-- Rate limits are in memory and cover one server process.
+- Rate limits are in memory and cover one server process. Failed-login buckets are kept for
+  at most 10,000 sources at a time; buckets that have refilled are dropped first.
+- Requests without a valid key are written to the request log too, so a flood of them grows
+  the database until a retention purge removes the rows.
+- The admin role gets 403 on a trace of an existing payment and 404 on a missing one, so it
+  can tell whether a UETR exists. UETRs are random, so this reveals little.
 - The request log is written after each response. If that write fails, the server log
   reports it, but the call is not refused.
 - The full list, with the test behind each mitigation, is in
@@ -333,13 +354,14 @@ pytest
 python -m echtzeit.scenario_report --seed 7 --spread-seeds 10 --out /tmp/scenarios-seed-7.md
 ```
 
-`pytest` should end with `297 passed, 4 skipped`; the four skipped tests need the ISO XSD
+`pytest` should end with `321 passed, 4 skipped`; the four skipped tests need the ISO XSD
 files (see Limits). The report command writes to `/tmp` so the committed results in
 `docs/results/` stay as they are; only its timing lines should differ from them.
 
 The report took about 4 minutes on the machine used here (234 s on 26 November 2026). CI
-runs `ruff` and `pytest` on Python 3.12 and 3.13, runs the tests a second time on an encrypted
-database, and runs `bandit` and `pip-audit`, for every push.
+runs `ruff` and `pytest` on Python 3.12, 3.13 and 3.14, runs the tests a second time on an
+encrypted database, and runs `bandit` and `pip-audit`, for every push. The GitHub actions are
+pinned to commit hashes; the Python tools are not pinned.
 
 Run the API locally:
 

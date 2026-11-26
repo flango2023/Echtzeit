@@ -22,6 +22,7 @@ but does not change the response.
 """
 
 import logging
+import math
 import os
 import time
 import uuid
@@ -136,20 +137,31 @@ class BodyLimit:
         if declared is not None and (not declared.isdigit() or int(declared) > self.max_bytes):
             await problem(413, "Request body too large")(scope, receive, send)
             return
-        seen = 0
+        seen, exceeded, started = 0, False, False
 
         async def limited() -> Message:
-            nonlocal seen
+            nonlocal seen, exceeded
             message = await receive()
             if message["type"] == "http.request":
                 seen += len(message.get("body", b""))
                 if seen > self.max_bytes:
+                    exceeded = True
                     raise _TooLarge
             return message
 
+        async def guarded(message: Message) -> None:
+            # FastAPI turns a failed body read into its own 400; answer 413 instead.
+            nonlocal started
+            if exceeded and not started:
+                return
+            started = started or message["type"] == "http.response.start"
+            await send(message)
+
         try:
-            await self.app(scope, limited, send)
+            await self.app(scope, limited, guarded)
         except _TooLarge:
+            pass
+        if exceeded and not started:
             await problem(413, "Request body too large")(scope, receive, send)
 
 
@@ -314,15 +326,15 @@ def create_app(
             source = request.client.host if request.client else "unknown"
             wait = failed_auth_limiter.acquire(f"failed:{source}")
             if wait:
-                raise HTTPException(429, "Too many failed attempts", {"Retry-After": f"{wait:.0f}"})
+                raise HTTPException(
+                    429, "Too many failed attempts", {"Retry-After": str(math.ceil(wait))}
+                )
             raise HTTPException(401, "Missing or invalid API key", {"WWW-Authenticate": "Bearer"})
         request.state.client_id = found.client_id
         request.state.key_id = found.key_id
         wait = limiter.acquire(found.client_id)
         if wait:
-            raise HTTPException(
-                429, "Rate limit exceeded", {"Retry-After": f"{max(1, round(wait))}"}
-            )
+            raise HTTPException(429, "Rate limit exceeded", {"Retry-After": str(math.ceil(wait))})
         return found
 
     Caller = Annotated[Client, Depends(client)]
@@ -480,7 +492,8 @@ def create_app(
     @app.post("/v1/payments/{uetr}/freeze")
     def freeze(uetr: str, body: FreezeIn, caller: Caller) -> dict:
         require(caller, Role.PSP)
-        if ledger.payment_accounts(uetr) is None:
+        parties = ledger.payment_accounts(uetr)
+        if parties is None:
             raise HTTPException(404, "Payment not found")
         result = freeze_traced_funds(
             ledger,
@@ -491,6 +504,9 @@ def create_app(
             max_depth=body.max_depth,
             only_bic=caller.bic,
         )
+        on_path = [p.bic for p in parties] + [a.bic for a in result.trace.accounts]
+        if caller.bic not in on_path:  # a bank with no part in the payment learns nothing
+            raise HTTPException(404, "Payment not found")
         return {
             "requested_cents": result.requested_cents,
             "secured_cents": result.secured_cents,
@@ -545,7 +561,13 @@ def create_app(
         require(caller, Role.AUDITOR, Role.PSP)
         records = audit.rejections(reason_code=reason_code)
         if caller.role is Role.PSP:
-            records = [r for r in records if caller.bic in (r.debtor_bic, r.creditor_bic)]
+            # The receiving side sees a refusal only if the named account really is its own, so
+            # a sender cannot place rows, and its customer's IBAN, in another bank's view.
+            def receiving(r) -> bool:
+                account = ledger.find_account_by_iban(r.creditor_iban)
+                return account is not None and account.bic == caller.bic == r.creditor_bic
+
+            records = [r for r in records if r.debtor_bic == caller.bic or receiving(r)]
         return [
             {
                 "recorded_at": r.recorded_at.isoformat(),

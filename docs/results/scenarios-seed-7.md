@@ -22,9 +22,9 @@ evidence about real fraud, real detection rates or real recovery rates.
 | Normal payments blocked | 0 | 0 | 0 | 0 |
 | Normal payments held back by the receiving bank | 0 | 0 | 0 | 6 |
 | Normal payments refused by the bank | 38 | 23 | 23 | 21 |
-| Assessment time p50 | n/a | 0.88 ms | 0.89 ms | 0.88 ms |
-| Assessment time p95 | n/a | 1.16 ms | 1.17 ms | 1.16 ms |
-| Assessment time p99 | n/a | 1.33 ms | 1.31 ms | 1.35 ms |
+| Assessment time p50 | n/a | 0.90 ms | 0.90 ms | 0.89 ms |
+| Assessment time p95 | n/a | 1.16 ms | 1.19 ms | 1.17 ms |
+| Assessment time p99 | n/a | 1.36 ms | 1.39 ms | 1.35 ms |
 | Ledger invariants hold | yes | yes | yes | yes |
 
 Recovered money is what holds stopped along the traced path after the victim's report,
@@ -60,7 +60,7 @@ Ledger invariants held in every run: yes.
 
 ## At the real fraud rate
 
-In this simulation about 24 of 823 payments are scams. In the EU/EEA in 2024, fraudulent credit transfers were 0.002% of all credit transfers by number (EBA and ECB, 2025 Report on payment fraud (published December 2025, data for 2024), page 15), about one in 49,999. If the share of normal payments flagged here carried over to real payments, each scam payment would come with this many flagged normal payments:
+In this simulation about 24 of 823 payments are scams. In the EU/EEA in 2024, fraudulent credit transfers were 0.002% of all credit transfers by number (EBA and ECB, 2025 Report on payment fraud (published December 2025, data for 2024), page 15), about one in 50,000. If the share of normal payments flagged here carried over to real payments, each scam payment would come with this many flagged normal payments:
 
 | Policy | Normal payments flagged | Flagged normal payments per scam payment at the real rate |
 |---|---|---|

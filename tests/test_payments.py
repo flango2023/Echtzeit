@@ -305,3 +305,22 @@ def test_a_completed_payment_is_not_screened_again_on_retry(ledger, audit, clock
 
     assert retry.accepted and retry.transfer.replayed
     assert ledger.balance(bob.id) == 1_000
+
+
+def test_a_message_dated_in_the_future_is_refused_like_a_late_one(processor, customer, clock):
+    alice = customer("Alice", funds=5_000)
+    bob = customer("Bob", bic=BANK_B)
+    future = message(alice, bob, accepted_at=T0 + timedelta(days=30))
+    assert processor.process_transfer(future).report.reason_code == "AB05"
+
+
+def test_a_resend_under_a_new_msg_id_gets_its_own_report_ids(processor, customer):
+    alice = customer("Alice", funds=5_000)
+    bob = customer("Bob", bic=BANK_B)
+    original = message(alice, bob)
+    first = processor.process_transfer(original)
+    again = processor.process_transfer(original)  # the same message: the same reply
+    resent = processor.process_transfer(replace(original, msg_id="MSG-9"))
+    assert first.report.msg_id == again.report.msg_id
+    assert resent.accepted and resent.report.msg_id != first.report.msg_id
+    assert resent.transfer.transfer_id == first.transfer.transfer_id  # money moved once

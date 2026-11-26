@@ -5,6 +5,8 @@ import threading
 import time
 from collections.abc import Callable
 
+MAX_BUCKETS = 10_000  # above this, buckets that have refilled completely are dropped
+
 
 class RateLimiter:
     def __init__(
@@ -26,6 +28,13 @@ class RateLimiter:
         """Take one token. Returns 0 if allowed, else the seconds to wait before retrying."""
         with self._lock:
             now = self._clock()
+            if len(self._buckets) >= MAX_BUCKETS:
+                # A full bucket is the same as no bucket, so forgetting it changes nothing.
+                self._buckets = {
+                    k: (t, last)
+                    for k, (t, last) in self._buckets.items()
+                    if t + (now - last) * self._rate < self._capacity
+                }
             tokens, last = self._buckets.get(key, (float(self._capacity), now))
             tokens = min(self._capacity, tokens + (now - last) * self._rate)
             if tokens >= 1:

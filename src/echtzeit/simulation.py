@@ -116,6 +116,7 @@ class ScenarioConfig:
     fraudster_gives_mule_name: float = 0.5  # otherwise the victim types a bank-like name
     mule_is_established: float = 0.5  # otherwise the mule account has never been used
     second_mule_level: float = 0.5
+    # Minute ranges are half-open: (2, 30) draws 2 to 29 minutes.
     mule_forward_minutes: tuple[int, int] = (2, 30)
     cash_out_minutes: tuple[int, int] = (5, 90)
     report_delays: tuple[timedelta, ...] = (

@@ -1,10 +1,13 @@
 import json
 import os
+import shutil
 import stat
+import subprocess
 from datetime import UTC, date, datetime, timedelta
 
 import pytest
 from fastapi.testclient import TestClient
+from sqlalchemy import text
 
 from echtzeit.api.app import create_app, create_app_from_env
 from echtzeit.api.auth import (
@@ -20,12 +23,13 @@ from echtzeit.api.ratelimit import RateLimiter
 from echtzeit.iso20022 import pacs002, pacs008
 from echtzeit.iso20022.identifiers import make_german_iban, new_uetr
 
-BANK_A, BANK_B, BANK_C = "ECHTDEFF", "ECHTDEF1", "ECHTDEF2"
+BANK_A, BANK_B, BANK_C, BANK_D = "ECHTDEFF", "ECHTDEF1", "ECHTDEF2", "ECHTDEF3"
 NOW = datetime(2026, 11, 25, 12, 0, tzinfo=UTC)
 KEYS = {
     "bank-a": "ez_bank_a_test_key_0000000000000000000000000000",
     "bank-b": "ez_bank_b_test_key_0000000000000000000000000000",
     "bank-c": "ez_bank_c_test_key_0000000000000000000000000000",
+    "bank-d": "ez_bank_d_test_key_0000000000000000000000000000",
     "auditor": "ez_auditor_test_key_000000000000000000000000000",
     "admin": "ez_admin_test_key_00000000000000000000000000000",
 }
@@ -45,7 +49,9 @@ def keystore() -> KeyStore:
         }
         if client_id.startswith("bank-"):
             entry["role"] = "psp"
-            entry["bic"] = {"bank-a": BANK_A, "bank-b": BANK_B, "bank-c": BANK_C}[client_id]
+            entry["bic"] = {"bank-a": BANK_A, "bank-b": BANK_B, "bank-c": BANK_C, "bank-d": BANK_D}[
+                client_id
+            ]
         else:
             entry["role"] = client_id
         entries.append(entry)
@@ -138,7 +144,7 @@ def test_each_client_is_rate_limited(ledger, audit):
     codes = [api.get("/v1/invariants", headers=auth("auditor")).status_code for _ in range(3)]
     assert codes == [200, 200, 429]
     limited = api.get("/v1/invariants", headers=auth("auditor"))
-    assert int(limited.headers["retry-after"]) >= 1
+    assert limited.headers["retry-after"] == "2"  # 1.5 s to the next token, rounded up
     assert api.get("/v1/invariants", headers=auth("admin")).status_code == 200  # own bucket
 
 
@@ -248,6 +254,9 @@ def test_large_bodies_are_refused_with_or_without_a_length(ledger, audit, world)
 
     chunked = api.post("/v1/payments", content=chunks(), headers=headers)
     assert chunked.status_code == 413
+    json_headers = {**auth("admin"), "Content-Type": "application/json"}
+    chunked_json = api.post("/v1/accounts", content=chunks(), headers=json_headers)
+    assert chunked_json.status_code == 413
 
 
 def test_vop_and_risk_assessment(api, world):
@@ -271,7 +280,7 @@ def test_vop_and_risk_assessment(api, world):
 # -- holds ----------------------------------------------------------------------------------
 
 
-def test_holds_are_placed_and_released_by_the_account_bank_only(api, world):
+def test_holds_are_placed_and_released_by_the_account_bank_only(api, world, engine):
     alice, _bob = world
     body = {"amount_cents": 40_000, "reason": "suspected scam"}
     assert (
@@ -308,6 +317,9 @@ def test_holds_are_placed_and_released_by_the_account_bank_only(api, world):
         ).status_code
         == 409
     )
+    with engine.connect() as connection:
+        released_by = connection.execute(text("SELECT released_by FROM hold_releases")).all()
+    assert released_by == [("bank-a",)]
 
 
 def test_who_placed_a_hold_cannot_be_spoofed(api, world):
@@ -386,6 +398,10 @@ def test_each_bank_freezes_only_its_own_accounts(api, chain, ledger):
     body = {"attribution": "TRACED_FUNDS_FIRST", "reason": "reported scam"}
     by_a = api.post(f"/v1/payments/{uetr}/freeze", json=body, headers=auth("bank-a")).json()
     assert by_a["holds"] == [] and by_a["secured_cents"] == 0  # bank A holds none of the money
+    missing = api.post(f"/v1/payments/{new_uetr()}/freeze", json=body, headers=auth("bank-d"))
+    uninvolved = api.post(f"/v1/payments/{uetr}/freeze", json=body, headers=auth("bank-d"))
+    assert missing.status_code == uninvolved.status_code == 404
+    assert missing.json() == uninvolved.json()
 
     by_c = api.post(f"/v1/payments/{uetr}/freeze", json=body, headers=auth("bank-c")).json()
     assert by_c["secured_cents"] == 30_000
@@ -411,6 +427,12 @@ def test_banks_see_only_rejections_that_involve_them(api, world):
     assert len(api.get("/v1/audit/rejections", headers=auth("bank-a")).json()) == 1
     assert len(api.get("/v1/audit/rejections", headers=auth("bank-b")).json()) == 1
     assert api.get("/v1/audit/rejections", headers=auth("bank-c")).json() == []
+    # Bank A names bank C and an IBAN C does not hold: C must not see the row or A's IBAN.
+    fake = {"holder_name": "Nobody", "iban": make_german_iban("999"), "bic": BANK_C}
+    named_c = payment(alice, fake, msg_id="MSG-2", tx_id="TX-2")
+    assert pacs002.parse(send(api, "bank-a", named_c).content).reason_code == "AC01"
+    assert api.get("/v1/audit/rejections", headers=auth("bank-c")).json() == []
+    assert len(api.get("/v1/audit/rejections", headers=auth("bank-a")).json()) == 2
     assert (
         len(api.get("/v1/audit/rejections?reason_code=MS03", headers=auth("auditor")).json()) == 1
     )
@@ -585,8 +607,14 @@ def test_the_launcher_refuses_unsafe_settings(tmp_path):
     with pytest.raises(ServeConfigError, match="without TLS"):
         check_config("0.0.0.0", 8000, None, None)
     cert, key = tmp_path / "cert.pem", tmp_path / "key.pem"
-    cert.write_text("cert")
-    key.write_text("key")
+    if shutil.which("openssl") is None:
+        pytest.skip("openssl is needed to make a test certificate")
+    subprocess.run(
+        ["openssl", "req", "-x509", "-newkey", "rsa:2048", "-nodes", "-days", "1"]
+        + ["-subj", "/CN=localhost", "-keyout", str(key), "-out", str(cert)],
+        check=True,
+        capture_output=True,
+    )
     os.chmod(key, 0o644)
     with pytest.raises(ServeConfigError, match="chmod 600"):
         check_config("0.0.0.0", 8443, cert, key)
@@ -610,6 +638,10 @@ def test_the_launcher_refuses_unsafe_settings(tmp_path):
         check_config("0.0.0.0", 8443, tmp_path / "missing.pem", key)
     with pytest.raises(ServeConfigError, match="port"):
         check_config("127.0.0.1", 0, None, None)
+    junk = tmp_path / "junk.pem"
+    junk.write_text("not a certificate")
+    with pytest.raises(ServeConfigError, match="do not load"):
+        check_config("0.0.0.0", 8443, junk, key, db_key)
 
 
 def test_the_server_does_not_start_without_a_key_file(monkeypatch, tmp_path):
@@ -682,3 +714,45 @@ def test_unexpected_errors_carry_the_safety_headers_and_are_logged(ledger, audit
     request_id = response.headers["x-request-id"]
     logged = [r for r in audit.requests() if r["request_id"] == request_id]
     assert [(r["route"], r["status"]) for r in logged] == [("/v1/invariants", 500)]
+
+
+def test_a_key_file_opened_to_others_while_running_refuses_every_key(tmp_path):
+    path = tmp_path / "keys.json"
+    clock = {"t": 0.0}
+    key, _ = add_key(path, "bank-a", Role.PSP, BANK_A)
+    store = KeyStore.from_file(path, monotonic=lambda: clock["t"])
+    os.chmod(path, 0o644)
+    clock["t"] += 5
+    assert store.authenticate(key) is None and store.broken
+
+
+def test_failed_login_buckets_stay_bounded():
+    from echtzeit.api import ratelimit
+
+    clock = {"t": 0.0}
+    limiter = RateLimiter(capacity=2, refill_per_second=1, clock=lambda: clock["t"])
+    for i in range(ratelimit.MAX_BUCKETS + 5):
+        limiter.acquire(f"source-{i}")
+        clock["t"] += 0.001
+    assert len(limiter._buckets) <= ratelimit.MAX_BUCKETS
+    clock["t"] = 0.0
+    burst = RateLimiter(capacity=2, refill_per_second=0.001, clock=lambda: clock["t"])
+    assert [burst.acquire("x") == 0 for _ in range(3)] == [True, True, False]
+
+
+def test_the_launcher_turns_the_access_log_off(tmp_path, monkeypatch):
+    import uvicorn
+
+    from echtzeit.api import serve
+
+    seen = {}
+    monkeypatch.setattr(uvicorn, "run", lambda *_args, **kwargs: seen.update(kwargs))
+    keys = tmp_path / "keys.json"
+    add_key(keys, "admin", Role.ADMIN, None)
+    serve.main(["--keys", str(keys), "--db", f"sqlite:///{tmp_path / 'x.db'}"])
+    assert seen["access_log"] is False and seen["proxy_headers"] is False
+
+
+def test_request_log_times_are_marked_as_utc(api, audit):
+    api.get("/v1/invariants", headers=auth("auditor"))
+    assert audit.requests()[0]["at"].endswith("+00:00")
