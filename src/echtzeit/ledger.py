@@ -12,6 +12,7 @@ Rules enforced here:
 """
 
 import hashlib
+import json
 from collections.abc import Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass, field
@@ -97,15 +98,17 @@ def _request_hash(
     end_to_end_id: str | None,
     uetr: str | None,
 ) -> str:
-    canonical = "|".join(
+    # A JSON list keeps field boundaries, so no value can shift text into its neighbour.
+    canonical = json.dumps(
         [
             debtor_id,
             creditor_id,
-            str(amount_cents),
+            amount_cents,
             reference or "",
             end_to_end_id or "",
             uetr or "",
-        ]
+        ],
+        ensure_ascii=False,
     )
     return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
 

@@ -192,3 +192,28 @@ def test_verify_invariants_detects_a_tampered_balance(ledger, fund, engine):
 
     assert not report.ok
     assert any("differs from ledger sum" in p for p in report.problems)
+
+
+def test_different_requests_never_share_an_idempotency_hash(ledger, fund):
+    """Field boundaries are part of the hash, so moving a separator changes it."""
+    alice = ledger.create_account("Alice")
+    bob = ledger.create_account("Bob")
+    fund(alice, 5_000)
+    ledger.transfer(
+        idempotency_key="t-sep",
+        debtor_id=alice,
+        creditor_id=bob,
+        amount_cents=100,
+        reference="x|y",
+        end_to_end_id="z",
+    )
+    with pytest.raises(IdempotencyConflict):
+        ledger.transfer(
+            idempotency_key="t-sep",
+            debtor_id=alice,
+            creditor_id=bob,
+            amount_cents=100,
+            reference="x",
+            end_to_end_id="y|z",
+        )
+    assert ledger.balance(bob) == 100

@@ -623,3 +623,62 @@ def test_the_server_does_not_start_without_a_key_file(monkeypatch, tmp_path):
     monkeypatch.setenv("ECHTZEIT_DATABASE_URL", f"sqlite:///{tmp_path / 'api.db'}")
     with pytest.raises(KeyFileError):
         create_app_from_env()
+
+
+def test_a_key_file_that_cannot_be_read_refuses_every_key(tmp_path):
+    """Any failure while reloading fails closed, including I/O and decoding errors."""
+    path = tmp_path / "keys.json"
+    clock = {"t": 0.0}
+    key, key_id = add_key(path, "bank-a", Role.PSP, BANK_A)
+    store = KeyStore.from_file(path, monotonic=lambda: clock["t"])
+    assert store.authenticate(key) is not None
+
+    revoke_key(path, key_id)  # the file changes, then becomes unreadable before the reload
+    os.chmod(path, 0o000)
+    try:
+        clock["t"] += 5
+        assert store.authenticate(key) is None and store.broken
+        clock["t"] += 5
+        assert store.authenticate(key) is None  # still refused, the revoked key never returns
+    finally:
+        os.chmod(path, 0o600)
+
+    other = tmp_path / "other.json"
+    second, _ = add_key(other, "bank-a", Role.PSP, BANK_A)
+    store = KeyStore.from_file(other, monotonic=lambda: clock["t"])
+    other.write_bytes(b"\xff\xfe not utf-8")
+    clock["t"] += 5
+    assert store.authenticate(second) is None and store.broken
+
+
+def test_key_entries_with_out_of_range_times_are_refused():
+    entry = {
+        "client_id": "a",
+        "key_id": "abcd1234",
+        "key_sha256": hash_key("ez_x"),
+        "role": "admin",
+        "expires_at": "9999-12-31T23:59:59-05:00",
+    }
+    with pytest.raises(KeyFileError):
+        KeyStore([entry])
+
+
+def test_the_api_schema_is_not_served(api):
+    for path in ("/openapi.json", "/docs", "/redoc"):
+        assert api.get(path).status_code == 404
+
+
+def test_unexpected_errors_carry_the_safety_headers_and_are_logged(ledger, audit, monkeypatch):
+    api = TestClient(create_app(ledger, audit, keystore()), raise_server_exceptions=False)
+
+    def broken(*_args, **_kwargs):
+        raise RuntimeError("database password is hunter2")
+
+    monkeypatch.setattr(type(ledger), "verify_invariants", broken)
+    response = api.get("/v1/invariants", headers=auth("auditor"))
+    assert response.status_code == 500 and "hunter2" not in response.text
+    assert response.headers["cache-control"] == "no-store"
+    assert response.headers["x-content-type-options"] == "nosniff"
+    request_id = response.headers["x-request-id"]
+    logged = [r for r in audit.requests() if r["request_id"] == request_id]
+    assert [(r["route"], r["status"]) for r in logged] == [("/v1/invariants", 500)]

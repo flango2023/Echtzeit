@@ -223,12 +223,24 @@ class SecurityHeaders:
         if scope.get("scheme") == "https":
             extra.append((b"strict-transport-security", b"max-age=31536000"))
 
+        started = False
+
         async def with_headers(message: Message) -> None:
+            nonlocal started
             if message["type"] == "http.response.start":
+                started = True
                 message["headers"] = [*message.get("headers", []), *extra]
             await send(message)
 
-        await self.app(scope, receive, with_headers)
+        try:
+            await self.app(scope, receive, with_headers)
+        except Exception:
+            # Unexpected errors are answered here rather than by Starlette's outermost error
+            # middleware, so the 500 carries the same headers and never shows internals.
+            logger.exception("unexpected error while handling a request")
+            if started:
+                raise
+            await problem(500, "Internal error")(scope, receive, with_headers)
 
 
 def _account_view(account: AccountInfo) -> dict:
@@ -272,6 +284,7 @@ def create_app(
         description="Fictional money only. Not for use with real payments or personal data.",
         docs_url=None,  # the interactive pages load scripts from a CDN
         redoc_url=None,
+        openapi_url=None,  # the schema would be readable without a key
     )
     processor = InstantPaymentProcessor(ledger, audit=audit, clock=clock)
     scorer = RiskScorer(ledger)
@@ -291,10 +304,6 @@ def create_app(
         # Report where the problem is and what is wrong, without echoing the submitted values.
         errors = [{"loc": list(e["loc"]), "msg": e["msg"]} for e in exc.errors()]
         return problem(422, "Invalid request", errors=errors)
-
-    @app.exception_handler(Exception)
-    async def unexpected(_request: Request, _exc: Exception):
-        return problem(500, "Internal error")
 
     def client(request: Request) -> Client:
         header = request.headers.get("authorization", "")

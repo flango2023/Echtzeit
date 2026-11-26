@@ -1,4 +1,5 @@
 import os
+import time
 from dataclasses import replace
 from datetime import UTC, date, datetime
 from pathlib import Path
@@ -323,3 +324,19 @@ def test_pacs002_schema_check_can_fail(transfer):
         "<StsId>STS-0001</StsId><Bogus/>",
     )
     assert not schema.validate(etree.fromstring(broken))
+
+
+@pytest.mark.parametrize(
+    "amount",
+    ["1E999990", "1E1000000", "1E2", "1_0.00", "\uff11.\uff10\uff10", "+5.00", "5.", ".5", "-1.00"],
+)
+def test_pacs008_parse_accepts_only_plain_decimal_amounts(transfer, amount):
+    """Exponents, signs, underscores and non-ASCII digits are refused quickly as MessageError."""
+    xml = pacs008.build(transfer)
+    for tag in ("IntrBkSttlmAmt", "TtlIntrBkSttlmAmt"):
+        xml = _tamper(xml, f'<{tag} Ccy="EUR">10.50</{tag}>', f'<{tag} Ccy="EUR">{amount}</{tag}>')
+    started = time.perf_counter()
+    with pytest.raises(MessageError) as caught:
+        pacs008.parse(xml)
+    assert time.perf_counter() - started < 1.0
+    assert amount not in str(caught.value)  # the submitted value is not echoed

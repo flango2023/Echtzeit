@@ -1,9 +1,9 @@
 """Small XML helpers shared by the message modules."""
 
 # ElementTree only builds documents here. Parsing of input goes through defusedxml.
+import re
 import xml.etree.ElementTree as ET  # nosec B405
 from datetime import UTC, date, datetime
-from decimal import Decimal, InvalidOperation
 
 from defusedxml import ElementTree as SafeET
 
@@ -48,15 +48,21 @@ def cents_to_amount(cents: int) -> str:
     return f"{cents // 100}.{cents % 100:02d}"
 
 
+# ASCII digits, an optional point and one or two fraction digits. Stricter than xs:decimal (no
+# sign, no leading or trailing point), and it never hands an exponent such as 1E999990 to
+# Decimal, whose conversion to an integer would take seconds of CPU.
+_AMOUNT = re.compile(r"([0-9]{1,18})(?:\.([0-9]{1,2}))?", re.ASCII)
+
+
 def amount_to_cents(text: str) -> int:
-    """Parse a decimal amount with at most two fraction digits into cents."""
-    try:
-        value = Decimal(text)
-    except InvalidOperation as exc:
-        raise ValueError(f"not a number: {text!r}") from exc
-    if not value.is_finite() or value.as_tuple().exponent < -2:
-        raise ValueError(f"more than two fraction digits or not finite: {text!r}")
-    return int(value * 100)
+    """Parse an amount such as 10.50 into cents. The value is not echoed in errors."""
+    match = _AMOUNT.fullmatch(text)
+    if match is None:
+        raise ValueError(
+            "must be ASCII digits with an optional point and at most two fraction digits"
+        )
+    whole, fraction = match.groups()
+    return int(whole) * 100 + int((fraction or "0").ljust(2, "0"))
 
 
 def format_datetime(moment: datetime) -> str:

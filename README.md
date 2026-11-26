@@ -259,9 +259,11 @@ Ledger and database:
 ISO 20022 and processing:
 
 - The messages cover one credit transfer per message, in EUR only, with IBAN and BIC
-  identification and unstructured remittance text. Postal addresses, party identifiers,
-  structured remittance, purpose codes and intermediary agents are not implemented. The EPC
-  character-set rule is not enforced. The messages are not certified and are not exchanged
+  identification and unstructured remittance text. Amounts must be plain ASCII digits with at
+  most two fraction digits (no sign, exponent or leading point), which is stricter than the
+  `xs:decimal` type in the schema. Postal addresses, party identifiers, structured remittance,
+  purpose codes and intermediary agents are not implemented. The EPC character-set rule is not
+  enforced. The messages are not certified and are not exchanged
   with any real scheme.
 - `pacs.002` accepts only the rejection codes the EPC lists for a message to the originator
   PSP. That list has no "suspected fraud" code, and it has no inter-PSP code for insufficient

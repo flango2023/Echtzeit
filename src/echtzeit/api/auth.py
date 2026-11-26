@@ -27,6 +27,7 @@ import argparse
 import hashlib
 import hmac
 import json
+import logging
 import os
 import secrets
 import stat
@@ -73,6 +74,9 @@ class KeyEntry:
     expires_at: datetime
 
 
+logger = logging.getLogger("echtzeit.api")
+
+
 class KeyFileError(Exception):
     """The key file is missing, unsafe or malformed."""
 
@@ -94,7 +98,10 @@ def _parse_time(value: object, client_id: str) -> datetime:
         raise KeyFileError(f"expires_at of {client_id!r} is not an ISO 8601 time") from exc
     if moment.tzinfo is None:
         raise KeyFileError(f"expires_at of {client_id!r} needs a time zone")
-    return moment.astimezone(UTC)
+    try:
+        return moment.astimezone(UTC)
+    except OverflowError as exc:
+        raise KeyFileError(f"expires_at of {client_id!r} is out of range") from exc
 
 
 def _check_entry(entry: object) -> KeyEntry:
@@ -141,7 +148,8 @@ def _check_entries(raw: object) -> list[KeyEntry]:
     return entries
 
 
-def _read_file(path: Path) -> list[KeyEntry]:
+def _load_file(path: Path) -> object:
+    """The parsed JSON of a key file, after the existence and mode checks."""
     if not path.is_file():
         raise KeyFileError(f"key file {path} does not exist")
     if path.stat().st_mode & (stat.S_IRWXG | stat.S_IRWXO):
@@ -149,10 +157,17 @@ def _read_file(path: Path) -> list[KeyEntry]:
             f"key file {path} is accessible by group or others; run: chmod 600 {path}"
         )
     try:
-        data = json.loads(path.read_text(encoding="utf-8"))
-    except json.JSONDecodeError as exc:
+        text = path.read_text(encoding="utf-8")
+    except (OSError, UnicodeDecodeError) as exc:
+        raise KeyFileError(f"key file {path} cannot be read as UTF-8 text") from exc
+    try:
+        return json.loads(text)
+    except (ValueError, RecursionError) as exc:
         raise KeyFileError(f"key file {path} is not valid JSON") from exc
-    return _check_entries(data)
+
+
+def _read_file(path: Path) -> list[KeyEntry]:
+    return _check_entries(_load_file(path))
 
 
 class KeyStore:
@@ -174,9 +189,7 @@ class KeyStore:
     @classmethod
     def from_file(cls, path: str | Path, **kwargs) -> "KeyStore":
         path = Path(path)
-        _read_file(path)  # validates, including the file mode
-        data = json.loads(path.read_text(encoding="utf-8"))
-        return cls(data, path=path, **kwargs)
+        return cls(_load_file(path), path=path, **kwargs)  # checks the file mode too
 
     def _file_signature(self) -> tuple[int, int, int] | None:
         try:
@@ -201,7 +214,9 @@ class KeyStore:
             try:
                 self._entries = _read_file(self._path)
                 self._broken = False
-            except KeyFileError:
+            except Exception:  # any failure fails closed, not only a KeyFileError
+                # The file holds only hashes, so the error text reveals no key.
+                logger.exception("key file %s could not be loaded; refusing every key", self._path)
                 self._entries = []
                 self._broken = True
 

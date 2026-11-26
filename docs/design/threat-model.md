@@ -37,7 +37,7 @@ nothing in the code addresses the threat yet.
 | Threat | Mitigation | Evidence |
 |---|---|---|
 | Guessing or brute-forcing a key | Keys are 32 random bytes from `secrets`. Failed attempts are rate-limited per source address. | `test_repeated_failed_logins_are_slowed_down` |
-| A stolen key | Keys expire (90 days by default, at most 365). A client can hold a second key while rotating. A revoked key stops working without a restart, because the server re-reads the key file when it changes. A key file that becomes invalid refuses every key. Keys travel only over TLS or on the local machine (see "Data in transit"). | `test_keys_expire`, `test_rotation_and_revocation_work_without_a_restart`, `test_a_broken_key_file_refuses_every_key_until_fixed` |
+| A stolen key | Keys expire (90 days by default, at most 365). A client can hold a second key while rotating. A revoked key stops working without a restart, because the server re-reads the key file when it changes. A key file that becomes invalid or unreadable refuses every key: any error during a reload, not only a malformed file, empties the key list. Keys travel only over TLS or on the local machine (see "Data in transit"). | `test_keys_expire`, `test_rotation_and_revocation_work_without_a_restart`, `test_a_broken_key_file_refuses_every_key_until_fixed`, `test_a_key_file_that_cannot_be_read_refuses_every_key` |
 | A bank sends a payment as another bank | The debtor agent BIC in the `pacs.008` must be the caller's BIC. | `test_a_bank_cannot_send_for_another_bank` |
 | A message names the wrong bank for an account | The processor rejects a BIC that does not match the account (`RC01`). | `test_wrong_bic_is_rejected_with_rc01` |
 
@@ -51,7 +51,7 @@ nothing in the code addresses the threat yet.
 | A bank holds or releases money on another bank's account | Holds, releases and freezes act only on the caller's own accounts. | `test_holds_are_placed_and_released_by_the_account_bank_only`, `test_each_bank_freezes_only_its_own_accounts` |
 | Setting fields the client should not control (`placed_by`, account kind) | Request bodies refuse unknown fields. `placed_by` comes from the key. | `test_who_placed_a_hold_cannot_be_spoofed`, `test_invalid_input_is_refused_without_echoing_it` |
 | Malicious XML (entity expansion, external entities) | Parsing uses `defusedxml`. Bodies are limited to 64 KB, with or without a length header. | `test_pacs008_parse_blocks_entity_expansion_and_external_entities`, `test_large_bodies_are_refused_with_or_without_a_length` |
-| Replaying a payment | Idempotency key and unique UETR. | `test_the_same_message_twice_moves_money_once`, `test_a_message_with_a_used_uetr_is_rejected_as_duplicate` |
+| Replaying a payment | Idempotency key and unique UETR. The request hash behind the key is computed over a JSON list, so two different requests cannot share it by moving a separator between fields. | `test_the_same_message_twice_moves_money_once`, `test_a_message_with_a_used_uetr_is_rejected_as_duplicate`, `test_different_requests_never_share_an_idempotency_hash` |
 
 ### Repudiation
 
@@ -69,7 +69,8 @@ nothing in the code addresses the threat yet.
 | The same probing through Verification of Payee | By design of the EPC scheme, VoP tells whether an IBAN can be verified and returns the holder name on a close match. Only rate limiting reduces scraping. | `test_vop_and_risk_assessment` |
 | Traces exposing other banks' customers | A bank sees its own accounts' IBANs; other accounts appear only as BIC and amounts. Only payments the bank took part in can be traced. | `test_trace_shows_other_banks_only_as_amounts` |
 | The audit log exposing other banks' rejections | A bank sees only rejections in which it is debtor or creditor agent. | `test_banks_see_only_rejections_that_involve_them` |
-| Error messages leaking internals or echoing input | Unexpected errors return a generic 500. Validation errors name the field, not the value. | `test_unexpected_errors_do_not_leak_details`, `test_invalid_input_is_refused_without_echoing_it` |
+| Error messages leaking internals or echoing input | Unexpected errors return a generic 500, which carries the same safety headers and request id as every other response and is written to the request log. Validation errors name the field, not the value. | `test_unexpected_errors_do_not_leak_details`, `test_unexpected_errors_carry_the_safety_headers_and_are_logged`, `test_invalid_input_is_refused_without_echoing_it` |
+| The API schema read without a key | The OpenAPI schema and the interactive documentation pages are not served. | `test_the_api_schema_is_not_served` |
 | The key file read by another local user | Keys are stored only as hashes. The server refuses to start if the file is readable by group or others. Files are written with mode 600, and replaced atomically so the server never reads half a file. | `test_new_keys_are_stored_only_as_hashes_in_a_private_file`, `test_unsafe_or_invalid_key_files_are_refused` |
 | Responses cached by intermediaries | `Cache-Control: no-store` on every response. | `test_health_needs_no_key_and_carries_safety_headers` |
 | Personal data in a copied database file (backup, lost disk) | With a key file, the database is opened through SQLCipher 4 (`sqlcipher3`), which encrypts every page with AES-256 and checks an HMAC-SHA512 on each page when it is read, including pages in the write-ahead log ([SQLCipher design](https://www.zetetic.net/sqlcipher/design/)). The key is a 256-bit raw key, so no password derivation is involved. A wrong key is refused at connect time. Temporary data is kept in memory, because SQLCipher's design notes assume file-based temporary storage is switched off; the code sets this, and the `sqlcipher3` 0.6.5 build used here already defaults to it. The launcher refuses a non-loopback address without a database key. Not covered: data in the memory of the running process, exports an operator makes, and databases opened without a key, which stay plain SQLite. | `test_the_ledger_works_on_an_encrypted_file_and_nothing_is_readable_on_disk`, `test_a_wrong_key_or_no_key_cannot_open_an_encrypted_file`, `test_the_launcher_refuses_unsafe_settings` |
@@ -83,6 +84,7 @@ nothing in the code addresses the threat yet.
 | Threat | Mitigation | Evidence |
 |---|---|---|
 | Flooding with requests | A token bucket per client and a body size limit. | `test_each_client_is_rate_limited` |
+| Amounts that are expensive to parse | An amount must be ASCII digits with an optional point and at most two fraction digits, so a short value such as `1E999990` never reaches the decimal conversion, which took 15.5 s for that value before the fix. | `test_pacs008_parse_accepts_only_plain_decimal_amounts` |
 | Limits bypassed with several server processes | Not mitigated: the rate limiter is in memory and covers one process only. | – |
 | Expensive traces | The depth is capped at 10. Not mitigated: each trace still replays every transfer since the payment, so its cost grows with the ledger. | – |
 | One slow writer blocking others | Not mitigated: SQLite allows one writer at a time, and the request log adds one write per call. | – |
