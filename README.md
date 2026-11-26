@@ -316,13 +316,26 @@ HTTP API:
 
 ## Run
 
+Run every command from the project folder. Python 3.12 or later is needed; check with
+`python3 --version`. The `python3` that ships with macOS is 3.9 and too old, so install a newer
+one (for example `brew install python`). Outside a virtual environment, macOS and many Linux
+systems have only `python3`, not `python`; once the environment is active, `python` and `pip`
+point to it. On macOS with iCloud Drive, create the environment as described in
+[macOS with iCloud Drive](#macos-with-icloud-drive) instead of the first `python3` line.
+
 ```bash
-python -m venv .venv
+git clone https://github.com/flango2023/Echtzeit.git
+cd Echtzeit
+python3 -m venv .venv
 source .venv/bin/activate
 pip install -e ".[dev]"
 pytest
-python -m echtzeit.scenario_report --seed 7 --spread-seeds 10 --out docs/results/scenarios-seed-7.md
+python -m echtzeit.scenario_report --seed 7 --spread-seeds 10 --out /tmp/scenarios-seed-7.md
 ```
+
+`pytest` should end with `296 passed, 4 skipped`; the four skipped tests need the ISO XSD
+files (see Limits). The report command writes to `/tmp` so the committed results in
+`docs/results/` stay as they are; only its timing lines should differ from them.
 
 The report took about 4 minutes on the machine used here (234 s on 26 November 2026). CI
 runs `ruff` and `pytest` on Python 3.12 and 3.13, runs the tests a second time on an encrypted
@@ -387,8 +400,9 @@ files in a folder ending in `.nosync`, which iCloud does not sync, stayed visibl
 environment in a `.nosync` folder and link `.venv` to it:
 
 ```bash
-python -m venv .venv.nosync
+python3 -m venv .venv.nosync
 ln -s .venv.nosync .venv
+source .venv/bin/activate
 ```
 
 Both names are in `.gitignore`. The tests run either way, because `pyproject.toml` sets the
