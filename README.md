@@ -333,7 +333,7 @@ pytest
 python -m echtzeit.scenario_report --seed 7 --spread-seeds 10 --out /tmp/scenarios-seed-7.md
 ```
 
-`pytest` should end with `296 passed, 4 skipped`; the four skipped tests need the ISO XSD
+`pytest` should end with `297 passed, 4 skipped`; the four skipped tests need the ISO XSD
 files (see Limits). The report command writes to `/tmp` so the committed results in
 `docs/results/` stay as they are; only its timing lines should differ from them.
 
