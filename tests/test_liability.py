@@ -254,3 +254,11 @@ def test_every_regime_that_moves_money_cites_primary_sources():
         assert any(source.primary for source in regime.sources)
         assert all(source.url.startswith("https://") for source in regime.sources)
     assert replace(NO_REFUND).sources == ()
+
+
+def test_eu_a_case_screened_by_the_payees_bank_meets_art_87():
+    screened = case(decision="ALLOW", points=20, reasons=["NEW_PAYEE"], receiver_screened=True)
+    a = allocate(screened, EU_PSR_PROVISIONAL, DEFAULT)
+    assert a.reason.startswith("art. 60")
+    business = replace(screened, kind="INVOICE_IBAN_CHANGE", victim_type="OTHER_BUSINESS")
+    assert not allocate(business, EU_PSR_PROVISIONAL, DEFAULT).covered

@@ -5,20 +5,22 @@ Status: implemented in version 0.1. All data is synthetic and every amount is fi
 ## What this step answers
 
 For the same synthetic population and the same scams, how much money is lost, prevented and
-recovered under three policies, and what does that cost normal customers?
+recovered under four policies, and what does that cost normal customers?
 
 | Policy | What the banks do |
 |---|---|
 | `NONE` | Nothing before the payment. After the victim reports, the payment is traced and the money still on accounts is frozen. |
 | `SENDER_ONLY` | The sending bank checks the payee name and scores every payment: allow, warn or block. |
 | `SENDER_AND_RECEIVER` | As above. When an outgoing payment is blocked because money is passing straight through an account, that bank also freezes the money that just arrived. |
+| `FULL_CHAIN` | As above, and the payee's bank screens every incoming payment before crediting it. A payment it holds back is rejected (`RR04`) and nothing moves. |
 
-The receiving-side freeze acts when the money tries to leave the account. It is not the EU
-rule. Under art. 73(3) of the EU Payment Services Regulation, in the Council's position at
-first reading of 21 October 2026, the payee's PSP may hold back suspicious funds when they
-arrive and return them. It must do so when the reasons are clear and incontrovertible. No
-policy here screens incoming payments, which also matters for EU liability (see
-[liability.md](liability.md)). The Regulation is not in force.
+The freeze in `SENDER_AND_RECEIVER` acts when the money tries to leave the account. The
+incoming screen in `FULL_CHAIN` acts when it arrives, which is the moment art. 73(3) of the EU
+Payment Services Regulation addresses (Council position at first reading, 21 October 2026,
+not in force). Under that article the payee's PSP may hold back suspicious funds and return
+them, and must when the reasons are clear and incontrovertible. `FULL_CHAIN` is also the only
+policy in which both banks monitor, which EU art. 87(3) asks for (see
+[liability.md](liability.md)).
 
 ## Scenario patterns and their sources
 
@@ -55,6 +57,28 @@ that a warned victim goes ahead is an assumption (`victim_ignores_warning`). Fra
 reported to coach victims past warnings (EPC162-24 notes they convince customers that the
 system has a flaw, section 2, page 17), but the value used is not measured.
 
+## Incoming screen (payee's bank)
+
+| Rule | Fires when | Points |
+|---|---|---|
+| `NAME_MISMATCH` | the name in the payment message does not match the account holder | 30 |
+| `FIRST_CREDIT` | the account has never received a payment from another customer | 25 |
+| `LARGE_FIRST_CREDIT` | the amount is at least €1,000 and more than 3 times any earlier payment to the account | 20 |
+
+A payment is held back at 45 points, but only if a rule other than `NAME_MISMATCH` fired: EU
+art. 73(3) does not allow the decision to rest solely on the payee-name check. The points
+and the threshold are this project's choices and are not calibrated. The EPC lists no reason
+code for "held back as suspected fraud", so `RR04` (regulatory reason) is used; that is also
+this project's choice.
+
+## Normal payments that look like scams
+
+Without them the results would flatter every rule about new payees and new accounts. Each run
+includes `new_account_gifts` (6 by default) large first payments from a relative to a family
+member's account opened during the measured period. Under `FULL_CHAIN` the incoming screen
+holds these back, and the results file counts them as normal payments held back by the
+receiving bank.
+
 ## How the simulation keeps the comparison fair
 
 - One seeded generator builds the population and the schedule before anything runs, so every
@@ -64,6 +88,9 @@ system has a flaw, section 2, page 17), but the value used is not measured.
   under every policy.
 - Each mule gets its own generator, because a second-level mule only exists when the first
   payment went through.
+- An established mule's earlier payment comes from an account created for that purpose, not
+  from a real customer. An earlier version used a random customer, and the run failed when
+  that customer had no money left.
 - Every run ends with `verify_invariants`, and the results say whether it held.
 - The detailed results use one seed. A spread table reports the minimum, median and maximum
   over seeds 1 to 10.

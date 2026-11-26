@@ -5,7 +5,7 @@ then a pacs.008 message, then the processor and the ledger. Scam money then move
 accounts and is withdrawn as cash. When the victim reports the scam, the payment is traced
 and the traced money still on accounts is frozen.
 
-The same population and schedule run under three policies:
+The same population and schedule run under four policies:
 
 * NONE: no risk score. Only the freeze after the victim's report.
 * SENDER_ONLY: the sending side scores every payment and warns or blocks.
@@ -13,7 +13,10 @@ The same population and schedule run under three policies:
   passing straight through an account, that bank also freezes the money that just arrived.
   The bank acts when the money tries to leave. This differs from EU PSR art. 73(3) (Council
   position at first reading), under which the payee's PSP may hold back suspicious funds when
-  they arrive; no policy here screens incoming payments.
+  they arrive.
+* FULL_CHAIN: as SENDER_AND_RECEIVER, and the payee's bank also screens every incoming payment
+  before crediting it (echtzeit.risk.IncomingScreen). A payment it holds back is rejected and
+  nothing moves. This is the only policy in which both banks monitor, as EU art. 87(3) asks.
 
 Scenario patterns, paraphrased from the EPC 2025 Payments Threats and Fraud Trends Report
 (EPC162-24, version 2.0, 19 November 2025):
@@ -53,8 +56,15 @@ from echtzeit.iso20022 import pacs008
 from echtzeit.iso20022.identifiers import make_german_iban, new_uetr
 from echtzeit.ledger import Ledger
 from echtzeit.models import SYSTEM, init_db
-from echtzeit.payments import InstantPaymentProcessor
-from echtzeit.risk import Assessment, Decision, RiskConfig, RiskScorer, recent_incoming_uetrs
+from echtzeit.payments import HELD_BACK, InstantPaymentProcessor
+from echtzeit.risk import (
+    Assessment,
+    Decision,
+    IncomingScreen,
+    RiskConfig,
+    RiskScorer,
+    recent_incoming_uetrs,
+)
 from echtzeit.tracing import Attribution, freeze_traced_funds, trace_payment
 
 BANKS = ("ECHTDEFF", "ECHTDEF1", "ECHTDEF2")
@@ -73,6 +83,7 @@ class Policy(Enum):
     NONE = "NONE"
     SENDER_ONLY = "SENDER_ONLY"
     SENDER_AND_RECEIVER = "SENDER_AND_RECEIVER"
+    FULL_CHAIN = "FULL_CHAIN"
 
 
 class Actor(Enum):
@@ -121,6 +132,10 @@ class ScenarioConfig:
     p_large_purchase: float = 0.004
     p_typo: float = 0.04  # payer types the name with one wrong letter
     p_trading_name: float = 0.05  # payer types a merchant's trading name, not its legal name
+    # Legitimate payments that look like scams: a relative sends a large first payment to a
+    # family member's account opened during the measured period. Without them, no normal payee
+    # would ever be new, and receiving-side rules about first payments could never misfire.
+    new_account_gifts: int = 6
 
 
 @dataclass
@@ -145,6 +160,8 @@ class CaseOutcome:
     # system-wide tracing are measured with this figure; see echtzeit.liability.
     recovered_first_hop_cents: int = 0
     mule_levels: int = 0
+    receiver_screened: bool = False  # the payee's bank screened the incoming payment
+    held_back: bool = False  # the payee's bank held it back before crediting
 
     @property
     def lost_cents(self) -> int:
@@ -163,6 +180,7 @@ class LegitStats:
     warned_and_went_ahead: int = 0
     blocked: int = 0
     refused_by_bank: int = 0  # not enough money, for example
+    held_back_by_receiver: int = 0  # screened by the payee's bank and returned
     vop: dict[str, int] = field(default_factory=dict)
 
     @property
@@ -227,10 +245,15 @@ class _Run:
         sessions = make_session_factory(engine)
         self.ledger = Ledger(sessions)
         self.now = config.start - timedelta(days=config.warmup_days + 1)
+        self.incoming = IncomingScreen(self.ledger) if policy is Policy.FULL_CHAIN else None
         self.processor = InstantPaymentProcessor(
-            self.ledger, audit=AuditLog(sessions), clock=lambda: self.now
+            self.ledger,
+            audit=AuditLog(sessions),
+            clock=lambda: self.now,
+            incoming_screen=self.screen_incoming if self.incoming else None,
         )
         self.scorer = RiskScorer(self.ledger, risk_config)
+        self.last_reason: str | None = None
         # Seeded on purpose, for reproducible simulations. Nothing security-related uses it:
         # payment identifiers (UETR) come from uuid4, which uses the operating system's source.
         self.rng = random.Random(config.seed)  # nosec B311
@@ -301,7 +324,10 @@ class _Run:
             )
             self.latency.append(assessment.elapsed_ns / 1e6)
             if assessment.decision is Decision.BLOCK:
-                if self.policy is Policy.SENDER_AND_RECEIVER and assessment.fired("PASS_THROUGH"):
+                if self.policy in (
+                    Policy.SENDER_AND_RECEIVER,
+                    Policy.FULL_CHAIN,
+                ) and assessment.fired("PASS_THROUGH"):
                     self.freeze_incoming(debtor)
                 return assessment, None, False
             if assessment.decision is Decision.WARN:
@@ -330,7 +356,19 @@ class _Run:
             creditor=pacs008.Party(typed_name[:70], creditor.iban, creditor.bic),
         )
         result = self.processor.process_transfer(message)
+        self.last_reason = result.report.reason_code
         return assessment, (uetr if result.accepted else None), ignored_warning
+
+    def screen_incoming(self, message: pacs008.CreditTransfer, creditor, now: datetime) -> bool:
+        """The payee's bank checks a payment before crediting it (FULL_CHAIN, measured period)."""
+        if not self.measured(now):
+            return False
+        return self.incoming.assess(
+            creditor_id=creditor.id,
+            named_creditor=message.creditor.name,
+            amount_cents=message.amount_cents,
+            at=now,
+        ).hold_back
 
     def freeze_incoming(self, account: _Party) -> None:
         """Receiving-side freeze: hold what just arrived from other customers, tagged by payment."""
@@ -386,7 +424,9 @@ class _Run:
                 stats.warned_and_went_ahead += 1
             else:
                 stats.allowed += 1
-            if uetr is None:
+            if uetr is None and self.last_reason == HELD_BACK:
+                stats.held_back_by_receiver += 1
+            elif uetr is None:
                 stats.refused_by_bank += 1
 
         return run
@@ -468,6 +508,20 @@ class _Run:
                         ),
                     )
 
+        # Accounts opened during the measured period, each receiving one large first payment
+        # from a relative. Drawn from the shared generator here, before any policy runs.
+        for i in range(cfg.new_account_gifts):
+            relative = rng.choice(self.consumers)
+            newcomer = self.open_account(self.person_name())
+            moment = cfg.start + timedelta(
+                days=rng.randrange(cfg.days), hours=rng.randint(9, 20), minutes=rng.randint(0, 59)
+            )
+            n += 1
+            self.at(
+                moment,
+                self.legit_payment(relative, newcomer, rng.randint(100_000, 300_000), -1, n),
+            )
+
         for business in self.businesses:
             self.fund(business, rng.randint(2_000_000, 8_000_000), first)
             invoices = {
@@ -510,7 +564,11 @@ class _Run:
         if _draw(self.cfg.seed, case_id, level, "established") < self.cfg.mule_is_established:
             history = self.cfg.start - timedelta(days=20)
             self.fund(mule, rng.randint(10_000, 150_000), history)
-            payer = rng.choice(self.consumers)
+            # An earlier payment from another customer makes the account look established. The
+            # payer is an account of its own, so it never depends on a real customer's balance
+            # (an earlier version took a random customer, who could have run out of money).
+            payer = self.open_account(f"{rng.choice(FIRST_NAMES)} {rng.choice(SURNAMES)}")
+            self.fund(payer, 1_000, history)
             self.ledger.transfer(
                 idempotency_key=self.key("mule-history"),
                 debtor_id=payer.id,
@@ -596,6 +654,8 @@ class _Run:
                 vop=assessment.vop.outcome.value if assessment else None,
                 warned_and_ignored=ignored,
                 executed=uetr is not None,
+                receiver_screened=self.incoming is not None and assessment is not None,
+                held_back=uetr is None and self.last_reason == HELD_BACK,
                 uetr=uetr,
             )
             self.cases.append(case)

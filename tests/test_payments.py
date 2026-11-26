@@ -9,6 +9,7 @@ from echtzeit.errors import InvalidRequest, MessageError
 from echtzeit.iso20022 import pacs002, pacs008
 from echtzeit.iso20022.identifiers import make_german_iban, new_uetr
 from echtzeit.models import SYSTEM
+from echtzeit.payments import InstantPaymentProcessor
 
 # -- accepted payments --------------------------------------------------------
 
@@ -262,3 +263,45 @@ def test_account_creation_validates_identifiers(ledger):
 def test_system_account_cannot_be_reached_by_a_payment_message(ledger):
     with pytest.raises(InvalidRequest, match="system account"):
         ledger.create_account("Funding", kind=SYSTEM, iban=make_german_iban("1"), bic=BANK_A)
+
+
+# -- incoming screen --------------------------------------------------------------------------
+
+
+def test_a_payment_held_back_by_the_payees_bank_moves_nothing(ledger, audit, clock, customer):
+    calls = []
+
+    def hold_everything(message, creditor, now):
+        calls.append((message.tx_id, creditor.id))
+        return True
+
+    screened = InstantPaymentProcessor(
+        ledger, audit=audit, clock=clock, incoming_screen=hold_everything
+    )
+    alice = customer("Alice", funds=5_000)
+    bob = customer("Bob", bic=BANK_B)
+
+    result = screened.process_transfer(message(alice, bob))
+
+    assert result.report.reason_code == "RR04"
+    assert calls == [("TX-1", bob.id)]
+    assert ledger.balance(alice.id) == 5_000 and ledger.balance(bob.id) == 0
+    assert [r.reason_code for r in audit.rejections()] == ["RR04"]
+
+
+def test_a_completed_payment_is_not_screened_again_on_retry(ledger, audit, clock, customer):
+    decisions = iter([False, True])
+
+    def screen(_message, _creditor, _now):
+        return next(decisions)
+
+    screened = InstantPaymentProcessor(ledger, audit=audit, clock=clock, incoming_screen=screen)
+    alice = customer("Alice", funds=5_000)
+    bob = customer("Bob", bic=BANK_B)
+    original = message(alice, bob)
+
+    assert screened.process_transfer(original).accepted
+    retry = screened.process_transfer(original)
+
+    assert retry.accepted and retry.transfer.replayed
+    assert ledger.balance(bob.id) == 1_000

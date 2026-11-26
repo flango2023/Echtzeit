@@ -205,3 +205,66 @@ def test_thresholds_come_from_the_config(ledger, world):
 
     assert result.points == 35  # new payee and fresh receiver
     assert result.decision is Decision.BLOCK
+
+
+# -- incoming screen (payee's bank) ---------------------------------------------------------
+
+
+def test_a_large_first_payment_to_a_new_account_is_held_back(ledger, world):
+    from echtzeit.risk import IncomingScreen
+
+    account, _ = world
+    mule, _ = account("Max Weber")
+
+    result = IncomingScreen(ledger).assess(
+        creditor_id=mule, named_creditor="Max Weber", amount_cents=500_000, at=T
+    )
+
+    assert result.hold_back
+    assert {r.rule for r in result.reasons} == {"FIRST_CREDIT", "LARGE_FIRST_CREDIT"}
+
+
+def test_an_ordinary_payment_to_an_established_account_is_credited(ledger, world):
+    from echtzeit.risk import IncomingScreen
+
+    account, pay = world
+    alice, _ = account("Alice", 500_000)
+    shop, _ = account("Shop")
+    pay(alice, shop, 10_000, T - timedelta(days=5))
+
+    result = IncomingScreen(ledger).assess(
+        creditor_id=shop, named_creditor="Shop", amount_cents=12_000, at=T
+    )
+
+    assert not result.hold_back and result.reasons == []
+
+
+def test_the_payee_name_alone_never_holds_a_payment_back(ledger, world):
+    """EU PSR art. 73(3): the decision may not rest solely on the payee-name check."""
+    from echtzeit.risk import IncomingConfig, IncomingScreen
+
+    account, pay = world
+    alice, _ = account("Alice", 500_000)
+    shop, _ = account("Shop")
+    pay(alice, shop, 10_000, T - timedelta(days=5))
+    strict = IncomingScreen(ledger, IncomingConfig(hold_at=10))
+
+    result = strict.assess(
+        creditor_id=shop, named_creditor="Someone Else", amount_cents=5_000, at=T
+    )
+
+    assert result.fired("NAME_MISMATCH") and result.points >= 10
+    assert not result.hold_back
+
+
+def test_system_funding_does_not_count_as_an_earlier_customer_payment(ledger, world):
+    from echtzeit.risk import IncomingScreen
+
+    account, _ = world
+    funded, _ = account("Funded", 100_000)  # funded only by the system account
+
+    result = IncomingScreen(ledger).assess(
+        creditor_id=funded, named_creditor="Funded", amount_cents=1_000, at=T
+    )
+
+    assert result.fired("FIRST_CREDIT")

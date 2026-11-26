@@ -8,22 +8,24 @@ evidence about real fraud, real detection rates or real recovery rates.
 
 ## Policies compared
 
-| | NONE | SENDER_ONLY | SENDER_AND_RECEIVER |
-|---|---|---|---|
-| Scam payments attempted | 24 (€86,272.17) | 24 (€86,237.75) | 24 (€86,237.75) |
-| Prevented before payment | €0.00 | €52,525.15 | €52,525.15 |
-| Recovered along the traced path | €35,339.48 | €8,065.25 | €26,305.42 |
-| Lost after that recovery | €50,932.69 | €25,647.35 | €7,407.18 |
-| Warned victims who went ahead | 0 | 9 | 9 |
-| Receiving-side freezes | 0 | 0 | 7 |
-| Normal payments | 793 | 793 | 793 |
-| Normal payments warned | 0 (0.0%) | 57 (7.2%) | 57 (7.2%) |
-| Normal payments blocked | 0 | 0 | 0 |
-| Normal payments refused by the bank | 53 | 29 | 29 |
-| Assessment time p50 | n/a | 0.87 ms | 0.87 ms |
-| Assessment time p95 | n/a | 1.14 ms | 1.14 ms |
-| Assessment time p99 | n/a | 1.30 ms | 1.29 ms |
-| Ledger invariants hold | yes | yes | yes |
+| | NONE | SENDER_ONLY | SENDER_AND_RECEIVER | FULL_CHAIN |
+|---|---|---|---|---|
+| Scam payments attempted | 24 (€88,492.66) | 24 (€88,638.59) | 24 (€88,638.59) | 24 (€90,473.46) |
+| Prevented before payment | €0.00 | €59,347.50 | €59,347.50 | €85,021.02 |
+| Recovered along the traced path | €25,760.29 | €6,390.58 | €23,316.00 | €5,428.15 |
+| Lost after that recovery | €62,732.37 | €22,900.51 | €5,975.09 | €24.29 |
+| Warned victims who went ahead | 0 | 8 | 8 | 8 |
+| Receiving-side freezes | 0 | 0 | 6 | 1 |
+| Scam payments held back by the receiving bank | 0 | 0 | 0 | 8 |
+| Normal payments | 799 | 799 | 799 | 799 |
+| Normal payments warned | 0 (0.0%) | 59 (7.4%) | 59 (7.4%) | 59 (7.4%) |
+| Normal payments blocked | 0 | 0 | 0 | 0 |
+| Normal payments held back by the receiving bank | 0 | 0 | 0 | 6 |
+| Normal payments refused by the bank | 38 | 23 | 23 | 21 |
+| Assessment time p50 | n/a | 0.87 ms | 0.88 ms | 0.87 ms |
+| Assessment time p95 | n/a | 1.14 ms | 1.17 ms | 1.10 ms |
+| Assessment time p99 | n/a | 1.31 ms | 1.35 ms | 1.25 ms |
+| Ledger invariants hold | yes | yes | yes | yes |
 
 Recovered money is what holds stopped along the traced path after the victim's report,
 measured with the lower-bound attribution rule (`TRACED_FUNDS_FIRST`). Normal payments refused by the bank
@@ -40,18 +42,19 @@ were made at all; compare the shares in the spread table.
 
 Minimum / median / maximum over the seeds, for each policy.
 
-| | NONE | SENDER_ONLY | SENDER_AND_RECEIVER |
-|---|---|---|---|
-| Lost after recovery along the traced path, share of attempted | 42.7% / 59.8% / 78.4% | 14.1% / 21.8% / 37.2% | 0.0% / 7.7% / 13.5% |
-| Prevented, share of attempted | 0.0% / 0.0% / 0.0% | 51.7% / 68.3% / 81.1% | 51.7% / 68.3% / 81.1% |
-| Recovered along the traced path, share of attempted | 21.6% / 40.2% / 57.3% | 1.5% / 7.4% / 20.7% | 8.6% / 22.8% / 39.6% |
-| Normal payments warned or blocked | 0.0% / 0.0% / 0.0% | 2.9% / 5.1% / 7.2% | 2.9% / 5.1% / 7.2% |
-| Victims bear under UK_PSR, share of attempted | 2.4% / 18.2% / 27.0% | 0.4% / 5.4% / 13.0% | 0.0% / 0.9% / 3.7% |
-| Banks bear under UK_PSR, share of attempted | 39.3% / 55.9% / 84.2% | 13.6% / 17.1% / 28.2% | 0.0% / 6.2% / 13.1% |
-| Victims bear under EU_PSR_PROVISIONAL, share of attempted | 0.0% / 0.0% / 0.0% | 0.0% / 0.0% / 0.0% | 0.0% / 0.0% / 0.0% |
-| Banks bear under EU_PSR_PROVISIONAL, share of attempted | 56.6% / 74.1% / 86.6% | 14.1% / 21.8% / 37.2% | 0.0% / 7.9% / 13.5% |
-| Victims bear under NO_REFUND, share of attempted | 56.6% / 74.1% / 86.6% | 14.1% / 21.8% / 37.2% | 0.0% / 7.9% / 13.5% |
-| Victims bear under BR_MED, share of attempted | 42.7% / 59.8% / 78.4% | 14.1% / 21.8% / 37.2% | 0.0% / 7.7% / 13.5% |
+| | NONE | SENDER_ONLY | SENDER_AND_RECEIVER | FULL_CHAIN |
+|---|---|---|---|---|
+| Lost after recovery along the traced path, share of attempted | 49.3% / 63.0% / 82.7% | 6.9% / 17.8% / 32.5% | 0.0% / 6.5% / 18.7% | 0.0% / 0.8% / 10.4% |
+| Prevented, share of attempted | 0.0% / 0.0% / 0.0% | 57.2% / 77.1% / 86.0% | 57.2% / 77.1% / 86.0% | 74.7% / 84.4% / 100.0% |
+| Recovered along the traced path, share of attempted | 17.3% / 37.0% / 50.7% | 0.9% / 6.6% / 15.5% | 6.7% / 16.6% / 34.9% | 0.0% / 9.0% / 25.3% |
+| Normal payments warned or blocked | 0.0% / 0.0% / 0.0% | 3.1% / 5.3% / 7.4% | 3.1% / 5.3% / 7.4% | 3.1% / 5.3% / 7.4% |
+| Normal payments held back by the receiving bank | 0.0% / 0.0% / 0.0% | 0.0% / 0.0% / 0.0% | 0.0% / 0.0% / 0.0% | 0.6% / 0.7% / 0.8% |
+| Victims bear under UK_PSR, share of attempted | 2.4% / 16.9% / 25.9% | 0.3% / 3.8% / 11.4% | 0.0% / 0.4% / 4.0% | 0.0% / 0.1% / 1.0% |
+| Banks bear under UK_PSR, share of attempted | 35.0% / 61.7% / 82.8% | 3.9% / 14.4% / 26.0% | 0.0% / 4.4% / 18.2% | 0.0% / 0.3% / 10.2% |
+| Victims bear under EU_PSR_PROVISIONAL, share of attempted | 0.0% / 0.0% / 0.0% | 0.0% / 0.0% / 0.0% | 0.0% / 0.0% / 0.0% | 0.0% / 0.0% / 1.0% |
+| Banks bear under EU_PSR_PROVISIONAL, share of attempted | 52.2% / 75.0% / 87.5% | 6.9% / 17.8% / 32.5% | 0.0% / 6.5% / 18.7% | 0.0% / 0.0% / 10.4% |
+| Victims bear under NO_REFUND, share of attempted | 52.2% / 75.0% / 87.5% | 6.9% / 17.8% / 32.5% | 0.0% / 6.5% / 18.7% | 0.0% / 0.9% / 10.4% |
+| Victims bear under BR_MED, share of attempted | 49.3% / 63.0% / 82.7% | 6.9% / 17.8% / 32.5% | 0.0% / 6.5% / 18.7% | 0.0% / 0.8% / 10.4% |
 
 Ledger invariants held in every run: yes.
 
@@ -59,58 +62,58 @@ Ledger invariants held in every run: yes.
 
 | Case | Kind | Decision (points) | Rules | VoP | Paid | Report after | Left on accounts (low–high) | Recovered | Lost |
 |---|---|---|---|---|---|---|---|---|---|
-| I1 | INVOICE_IBAN_CHANGE | not scored | – | – | yes | 1 h | €267.07–€267.07 | €267.07 | €4,598.30 |
-| I10 | INVOICE_IBAN_CHANGE | not scored | – | – | yes | 1 h | €3,584.22–€3,584.22 | €3,584.22 | €0.00 |
-| I11 | INVOICE_IBAN_CHANGE | not scored | – | – | yes | 1 h | €8.81–€8.81 | €8.81 | €1,704.65 |
-| I12 | INVOICE_IBAN_CHANGE | not scored | – | – | yes | 72 h | €76.61–€1,273.76 | €76.61 | €1,197.15 |
-| I2 | INVOICE_IBAN_CHANGE | not scored | – | – | yes | 24 h | €128.54–€525.71 | €128.54 | €2,924.06 |
-| I3 | INVOICE_IBAN_CHANGE | not scored | – | – | yes | 15 min | €50.97–€50.97 | €50.97 | €4,289.64 |
-| I4 | INVOICE_IBAN_CHANGE | not scored | – | – | yes | 72 h | €459.94–€3,147.60 | €459.94 | €4,034.42 |
-| I5 | INVOICE_IBAN_CHANGE | not scored | – | – | yes | 15 min | €3,577.14–€3,577.14 | €3,577.14 | €0.00 |
-| I6 | INVOICE_IBAN_CHANGE | not scored | – | – | yes | 24 h | €601.06–€1,058.72 | €601.06 | €4,105.91 |
-| I7 | INVOICE_IBAN_CHANGE | not scored | – | – | yes | 15 min | €3,359.72–€3,359.72 | €3,359.72 | €0.00 |
-| I8 | INVOICE_IBAN_CHANGE | not scored | – | – | yes | 24 h | €78.45–€78.45 | €78.45 | €747.59 |
-| I9 | INVOICE_IBAN_CHANGE | not scored | – | – | yes | 6 h | €221.80–€221.80 | €221.80 | €4,427.38 |
-| S1 | SAFE_ACCOUNT | not scored | – | – | yes | 15 min | €3,945.95–€3,945.95 | €3,945.95 | €0.00 |
-| S10 | SAFE_ACCOUNT | not scored | – | – | yes | 24 h | €375.01–€1,628.80 | €375.01 | €4,462.83 |
-| S11 | SAFE_ACCOUNT | not scored | – | – | yes | 72 h | €18.30–€117.31 | €18.30 | €99.01 |
-| S12 | SAFE_ACCOUNT | not scored | – | – | yes | 24 h | €6.07–€6.07 | €6.07 | €1,775.66 |
-| S2 | SAFE_ACCOUNT | not scored | – | – | yes | 15 min | €7,523.40–€7,523.40 | €7,523.40 | €0.00 |
-| S3 | SAFE_ACCOUNT | not scored | – | – | yes | 1 h | €4,314.34–€4,314.34 | €4,314.34 | €0.00 |
-| S4 | SAFE_ACCOUNT | not scored | – | – | yes | 24 h | €206.32–€1,243.63 | €206.32 | €1,939.31 |
-| S5 | SAFE_ACCOUNT | not scored | – | – | yes | 24 h | €342.44–€1,165.89 | €342.44 | €5,555.15 |
-| S6 | SAFE_ACCOUNT | not scored | – | – | yes | 6 h | €110.14–€1,261.19 | €110.14 | €2,707.46 |
-| S7 | SAFE_ACCOUNT | not scored | – | – | yes | 6 h | €231.49–€758.30 | €231.49 | €2,572.88 |
-| S8 | SAFE_ACCOUNT | not scored | – | – | yes | 24 h | €395.51–€546.17 | €395.51 | €3,791.29 |
-| S9 | SAFE_ACCOUNT | not scored | – | – | yes | 15 min | €5,456.18–€5,456.18 | €5,456.18 | €0.00 |
+| I1 | INVOICE_IBAN_CHANGE | not scored | – | – | yes | 1 h | €255.21–€255.21 | €255.21 | €4,393.97 |
+| I10 | INVOICE_IBAN_CHANGE | not scored | – | – | yes | 1 h | €5,222.04–€5,222.04 | €5,222.04 | €0.00 |
+| I11 | INVOICE_IBAN_CHANGE | not scored | – | – | yes | 1 h | €20.64–€20.64 | €20.64 | €3,993.29 |
+| I12 | INVOICE_IBAN_CHANGE | not scored | – | – | yes | 72 h | €287.91–€1,506.64 | €287.91 | €4,499.83 |
+| I2 | INVOICE_IBAN_CHANGE | not scored | – | – | yes | 24 h | €150.93–€548.10 | €150.93 | €3,433.29 |
+| I3 | INVOICE_IBAN_CHANGE | not scored | – | – | yes | 15 min | €20.12–€20.12 | €20.12 | €1,693.34 |
+| I4 | INVOICE_IBAN_CHANGE | not scored | – | – | yes | 72 h | €130.35–€1,273.76 | €130.35 | €1,143.41 |
+| I5 | INVOICE_IBAN_CHANGE | not scored | – | – | yes | 15 min | €2,419.38–€2,419.38 | €2,419.38 | €0.00 |
+| I6 | INVOICE_IBAN_CHANGE | not scored | – | – | yes | 24 h | €716.47–€1,174.13 | €716.47 | €4,894.38 |
+| I7 | INVOICE_IBAN_CHANGE | not scored | – | – | yes | 15 min | €3,202.28–€3,202.28 | €3,202.28 | €0.00 |
+| I8 | INVOICE_IBAN_CHANGE | not scored | – | – | yes | 24 h | €172.73–€172.73 | €172.73 | €1,646.17 |
+| I9 | INVOICE_IBAN_CHANGE | not scored | – | – | yes | 6 h | €121.63–€121.63 | €121.63 | €2,427.92 |
+| S1 | SAFE_ACCOUNT | not scored | – | – | yes | 15 min | €4,855.58–€4,855.58 | €4,855.58 | €0.00 |
+| S10 | SAFE_ACCOUNT | not scored | – | – | yes | 24 h | €551.29–€1,805.08 | €551.29 | €6,560.76 |
+| S11 | SAFE_ACCOUNT | not scored | – | – | yes | 72 h | €225.81–€1,409.47 | €225.81 | €1,222.12 |
+| S12 | SAFE_ACCOUNT | not scored | – | – | yes | 24 h | €8.56–€8.56 | €8.56 | €2,503.48 |
+| S2 | SAFE_ACCOUNT | not scored | – | – | yes | 15 min | €671.71–€671.71 | €671.71 | €0.00 |
+| S3 | SAFE_ACCOUNT | not scored | – | – | yes | 1 h | €365.99–€365.99 | €365.99 | €0.00 |
+| S4 | SAFE_ACCOUNT | not scored | – | – | yes | 24 h | €593.37–€1,630.68 | €593.37 | €5,577.58 |
+| S5 | SAFE_ACCOUNT | not scored | – | – | yes | 24 h | €1.50–€25.79 | €1.50 | €24.29 |
+| S6 | SAFE_ACCOUNT | not scored | – | – | yes | 6 h | €375.89–€1,526.94 | €375.89 | €9,240.04 |
+| S7 | SAFE_ACCOUNT | not scored | – | – | yes | 6 h | €410.67–€937.48 | €410.67 | €4,564.48 |
+| S8 | SAFE_ACCOUNT | not scored | – | – | yes | 24 h | €512.63–€663.29 | €512.63 | €4,914.02 |
+| S9 | SAFE_ACCOUNT | not scored | – | – | yes | 15 min | €4,467.60–€4,467.60 | €4,467.60 | €0.00 |
 
 ## Cases under SENDER_ONLY
 
 | Case | Kind | Decision (points) | Rules | VoP | Paid | Report after | Left on accounts (low–high) | Recovered | Lost |
 |---|---|---|---|---|---|---|---|---|---|
 | I1 | INVOICE_IBAN_CHANGE | BLOCK (75) | NEW_PAYEE, VOP_NO_MATCH, FRESH_RECEIVER | NO_MATCH | no | – | €0.00–€0.00 | €0.00 | €0.00 |
-| I10 | INVOICE_IBAN_CHANGE | WARN (60) | NEW_PAYEE, VOP_NO_MATCH | NO_MATCH | yes | 1 h | €71.26–€892.92 | €71.26 | €3,512.96 |
+| I10 | INVOICE_IBAN_CHANGE | WARN (60) | NEW_PAYEE, VOP_NO_MATCH | NO_MATCH | yes | 1 h | €103.82–€925.48 | €103.82 | €5,118.22 |
 | I11 | INVOICE_IBAN_CHANGE | BLOCK (75) | NEW_PAYEE, VOP_NO_MATCH, FRESH_RECEIVER | NO_MATCH | no | – | €0.00–€0.00 | €0.00 | €0.00 |
 | I12 | INVOICE_IBAN_CHANGE | BLOCK (75) | NEW_PAYEE, VOP_NO_MATCH, FRESH_RECEIVER | NO_MATCH | no | – | €0.00–€0.00 | €0.00 | €0.00 |
-| I2 | INVOICE_IBAN_CHANGE | WARN (60) | NEW_PAYEE, VOP_NO_MATCH | NO_MATCH | yes | 24 h | €128.54–€525.71 | €128.54 | €2,924.06 |
+| I2 | INVOICE_IBAN_CHANGE | WARN (60) | NEW_PAYEE, VOP_NO_MATCH | NO_MATCH | yes | 24 h | €150.93–€548.10 | €150.93 | €3,433.29 |
 | I3 | INVOICE_IBAN_CHANGE | BLOCK (75) | NEW_PAYEE, VOP_NO_MATCH, FRESH_RECEIVER | NO_MATCH | no | – | €0.00–€0.00 | €0.00 | €0.00 |
-| I4 | INVOICE_IBAN_CHANGE | WARN (60) | NEW_PAYEE, VOP_NO_MATCH | NO_MATCH | yes | 72 h | €346.53–€1,751.82 | €346.53 | €4,147.83 |
-| I5 | INVOICE_IBAN_CHANGE | WARN (60) | NEW_PAYEE, VOP_NO_MATCH | NO_MATCH | yes | 15 min | €3,577.14–€3,577.14 | €3,577.14 | €0.00 |
-| I6 | INVOICE_IBAN_CHANGE | WARN (60) | NEW_PAYEE, VOP_NO_MATCH | NO_MATCH | yes | 24 h | €204.93–€662.59 | €204.93 | €4,502.04 |
-| I7 | INVOICE_IBAN_CHANGE | WARN (60) | NEW_PAYEE, VOP_NO_MATCH | NO_MATCH | yes | 15 min | €3,359.72–€3,359.72 | €3,359.72 | €0.00 |
+| I4 | INVOICE_IBAN_CHANGE | WARN (60) | NEW_PAYEE, VOP_NO_MATCH | NO_MATCH | yes | 72 h | €98.21–€1,273.76 | €98.21 | €1,175.55 |
+| I5 | INVOICE_IBAN_CHANGE | WARN (60) | NEW_PAYEE, VOP_NO_MATCH | NO_MATCH | yes | 15 min | €2,419.38–€2,419.38 | €2,419.38 | €0.00 |
+| I6 | INVOICE_IBAN_CHANGE | WARN (60) | NEW_PAYEE, VOP_NO_MATCH | NO_MATCH | yes | 24 h | €244.28–€701.94 | €244.28 | €5,366.57 |
+| I7 | INVOICE_IBAN_CHANGE | WARN (60) | NEW_PAYEE, VOP_NO_MATCH | NO_MATCH | yes | 15 min | €3,202.28–€3,202.28 | €3,202.28 | €0.00 |
 | I8 | INVOICE_IBAN_CHANGE | BLOCK (75) | NEW_PAYEE, VOP_NO_MATCH, FRESH_RECEIVER | NO_MATCH | no | – | €0.00–€0.00 | €0.00 | €0.00 |
 | I9 | INVOICE_IBAN_CHANGE | BLOCK (75) | NEW_PAYEE, VOP_NO_MATCH, FRESH_RECEIVER | NO_MATCH | no | – | €0.00–€0.00 | €0.00 | €0.00 |
 | S1 | SAFE_ACCOUNT | BLOCK (85) | NEW_PAYEE, AMOUNT_SPIKE, VOP_NO_MATCH | NO_MATCH | no | – | €0.00–€0.00 | €0.00 | €0.00 |
-| S10 | SAFE_ACCOUNT | WARN (60) | NEW_PAYEE, AMOUNT_SPIKE, FRESH_RECEIVER | MATCH | no | – | €0.00–€0.00 | €0.00 | €0.00 |
-| S11 | SAFE_ACCOUNT | BLOCK (75) | NEW_PAYEE, VOP_NO_MATCH, FRESH_RECEIVER | NO_MATCH | no | – | €0.00–€0.00 | €0.00 | €0.00 |
-| S12 | SAFE_ACCOUNT | WARN (55) | NEW_PAYEE, BALANCE_DRAIN, FRESH_RECEIVER | MATCH | yes | 24 h | €6.07–€6.07 | €6.07 | €1,775.66 |
-| S2 | SAFE_ACCOUNT | BLOCK (120) | NEW_PAYEE, AMOUNT_SPIKE, BALANCE_DRAIN, VOP_NO_MATCH, FRESH_RECEIVER | NO_MATCH | no | – | €0.00–€0.00 | €0.00 | €0.00 |
-| S3 | SAFE_ACCOUNT | BLOCK (100) | NEW_PAYEE, AMOUNT_SPIKE, VOP_NO_MATCH, FRESH_RECEIVER | NO_MATCH | no | – | €0.00–€0.00 | €0.00 | €0.00 |
-| S4 | SAFE_ACCOUNT | ALLOW (20) | NEW_PAYEE | MATCH | yes | 24 h | €136.26–€1,173.57 | €136.26 | €2,015.20 |
-| S5 | SAFE_ACCOUNT | BLOCK (105) | NEW_PAYEE, AMOUNT_SPIKE, BALANCE_DRAIN, VOP_NO_MATCH | NO_MATCH | no | – | €0.00–€0.00 | €0.00 | €0.00 |
-| S6 | SAFE_ACCOUNT | WARN (60) | NEW_PAYEE, VOP_NO_MATCH | NO_MATCH | yes | 6 h | €110.14–€1,261.19 | €110.14 | €2,707.46 |
-| S7 | SAFE_ACCOUNT | BLOCK (105) | NEW_PAYEE, AMOUNT_SPIKE, BALANCE_DRAIN, VOP_NO_MATCH | NO_MATCH | no | – | €0.00–€0.00 | €0.00 | €0.00 |
-| S8 | SAFE_ACCOUNT | WARN (45) | NEW_PAYEE, AMOUNT_SPIKE | MATCH | yes | 24 h | €124.66–€275.32 | €124.66 | €4,062.14 |
+| S10 | SAFE_ACCOUNT | BLOCK (80) | NEW_PAYEE, AMOUNT_SPIKE, BALANCE_DRAIN, FRESH_RECEIVER | MATCH | no | – | €0.00–€0.00 | €0.00 | €0.00 |
+| S11 | SAFE_ACCOUNT | BLOCK (95) | NEW_PAYEE, BALANCE_DRAIN, VOP_NO_MATCH, FRESH_RECEIVER | NO_MATCH | no | – | €0.00–€0.00 | €0.00 | €0.00 |
+| S12 | SAFE_ACCOUNT | ALLOW (35) | NEW_PAYEE, FRESH_RECEIVER | MATCH | yes | 24 h | €8.61–€8.61 | €8.61 | €2,517.51 |
+| S2 | SAFE_ACCOUNT | BLOCK (75) | NEW_PAYEE, VOP_NO_MATCH, FRESH_RECEIVER | NO_MATCH | no | – | €0.00–€0.00 | €0.00 | €0.00 |
+| S3 | SAFE_ACCOUNT | BLOCK (75) | NEW_PAYEE, VOP_NO_MATCH, FRESH_RECEIVER | NO_MATCH | no | – | €0.00–€0.00 | €0.00 | €0.00 |
+| S4 | SAFE_ACCOUNT | WARN (45) | NEW_PAYEE, AMOUNT_SPIKE | MATCH | no | – | €0.00–€0.00 | €0.00 | €0.00 |
+| S5 | SAFE_ACCOUNT | WARN (60) | NEW_PAYEE, VOP_NO_MATCH | NO_MATCH | yes | 24 h | €1.50–€25.79 | €1.50 | €24.29 |
+| S6 | SAFE_ACCOUNT | BLOCK (105) | NEW_PAYEE, AMOUNT_SPIKE, BALANCE_DRAIN, VOP_NO_MATCH | NO_MATCH | no | – | €0.00–€0.00 | €0.00 | €0.00 |
+| S7 | SAFE_ACCOUNT | BLOCK (85) | NEW_PAYEE, AMOUNT_SPIKE, VOP_NO_MATCH | NO_MATCH | no | – | €0.00–€0.00 | €0.00 | €0.00 |
+| S8 | SAFE_ACCOUNT | WARN (45) | NEW_PAYEE, AMOUNT_SPIKE | MATCH | yes | 24 h | €161.57–€312.23 | €161.57 | €5,265.08 |
 | S9 | SAFE_ACCOUNT | BLOCK (85) | NEW_PAYEE, AMOUNT_SPIKE, VOP_NO_MATCH | NO_MATCH | no | – | €0.00–€0.00 | €0.00 | €0.00 |
 
 ## Cases under SENDER_AND_RECEIVER
@@ -118,28 +121,57 @@ Ledger invariants held in every run: yes.
 | Case | Kind | Decision (points) | Rules | VoP | Paid | Report after | Left on accounts (low–high) | Recovered | Lost |
 |---|---|---|---|---|---|---|---|---|---|
 | I1 | INVOICE_IBAN_CHANGE | BLOCK (75) | NEW_PAYEE, VOP_NO_MATCH, FRESH_RECEIVER | NO_MATCH | no | – | €0.00–€0.00 | €0.00 | €0.00 |
-| I10 | INVOICE_IBAN_CHANGE | WARN (60) | NEW_PAYEE, VOP_NO_MATCH | NO_MATCH | yes | 1 h | €3,584.22–€3,584.22 | €3,584.22 | €0.00 |
+| I10 | INVOICE_IBAN_CHANGE | WARN (60) | NEW_PAYEE, VOP_NO_MATCH | NO_MATCH | yes | 1 h | €5,222.04–€5,222.04 | €5,222.04 | €0.00 |
 | I11 | INVOICE_IBAN_CHANGE | BLOCK (75) | NEW_PAYEE, VOP_NO_MATCH, FRESH_RECEIVER | NO_MATCH | no | – | €0.00–€0.00 | €0.00 | €0.00 |
 | I12 | INVOICE_IBAN_CHANGE | BLOCK (75) | NEW_PAYEE, VOP_NO_MATCH, FRESH_RECEIVER | NO_MATCH | no | – | €0.00–€0.00 | €0.00 | €0.00 |
-| I2 | INVOICE_IBAN_CHANGE | WARN (60) | NEW_PAYEE, VOP_NO_MATCH | NO_MATCH | yes | 24 h | €128.54–€525.71 | €128.54 | €2,924.06 |
+| I2 | INVOICE_IBAN_CHANGE | WARN (60) | NEW_PAYEE, VOP_NO_MATCH | NO_MATCH | yes | 24 h | €150.93–€548.10 | €150.93 | €3,433.29 |
 | I3 | INVOICE_IBAN_CHANGE | BLOCK (75) | NEW_PAYEE, VOP_NO_MATCH, FRESH_RECEIVER | NO_MATCH | no | – | €0.00–€0.00 | €0.00 | €0.00 |
-| I4 | INVOICE_IBAN_CHANGE | WARN (60) | NEW_PAYEE, VOP_NO_MATCH | NO_MATCH | yes | 72 h | €4,494.36–€4,494.36 | €4,494.36 | €0.00 |
-| I5 | INVOICE_IBAN_CHANGE | WARN (60) | NEW_PAYEE, VOP_NO_MATCH | NO_MATCH | yes | 15 min | €3,577.14–€3,577.14 | €3,577.14 | €0.00 |
-| I6 | INVOICE_IBAN_CHANGE | WARN (60) | NEW_PAYEE, VOP_NO_MATCH | NO_MATCH | yes | 24 h | €4,706.97–€4,706.97 | €4,706.97 | €0.00 |
-| I7 | INVOICE_IBAN_CHANGE | WARN (60) | NEW_PAYEE, VOP_NO_MATCH | NO_MATCH | yes | 15 min | €3,359.72–€3,359.72 | €3,359.72 | €0.00 |
+| I4 | INVOICE_IBAN_CHANGE | WARN (60) | NEW_PAYEE, VOP_NO_MATCH | NO_MATCH | yes | 72 h | €1,273.76–€1,273.76 | €1,273.76 | €0.00 |
+| I5 | INVOICE_IBAN_CHANGE | WARN (60) | NEW_PAYEE, VOP_NO_MATCH | NO_MATCH | yes | 15 min | €2,419.38–€2,419.38 | €2,419.38 | €0.00 |
+| I6 | INVOICE_IBAN_CHANGE | WARN (60) | NEW_PAYEE, VOP_NO_MATCH | NO_MATCH | yes | 24 h | €5,610.85–€5,610.85 | €5,610.85 | €0.00 |
+| I7 | INVOICE_IBAN_CHANGE | WARN (60) | NEW_PAYEE, VOP_NO_MATCH | NO_MATCH | yes | 15 min | €3,202.28–€3,202.28 | €3,202.28 | €0.00 |
 | I8 | INVOICE_IBAN_CHANGE | BLOCK (75) | NEW_PAYEE, VOP_NO_MATCH, FRESH_RECEIVER | NO_MATCH | no | – | €0.00–€0.00 | €0.00 | €0.00 |
 | I9 | INVOICE_IBAN_CHANGE | BLOCK (75) | NEW_PAYEE, VOP_NO_MATCH, FRESH_RECEIVER | NO_MATCH | no | – | €0.00–€0.00 | €0.00 | €0.00 |
 | S1 | SAFE_ACCOUNT | BLOCK (85) | NEW_PAYEE, AMOUNT_SPIKE, VOP_NO_MATCH | NO_MATCH | no | – | €0.00–€0.00 | €0.00 | €0.00 |
-| S10 | SAFE_ACCOUNT | WARN (60) | NEW_PAYEE, AMOUNT_SPIKE, FRESH_RECEIVER | MATCH | no | – | €0.00–€0.00 | €0.00 | €0.00 |
-| S11 | SAFE_ACCOUNT | BLOCK (75) | NEW_PAYEE, VOP_NO_MATCH, FRESH_RECEIVER | NO_MATCH | no | – | €0.00–€0.00 | €0.00 | €0.00 |
-| S12 | SAFE_ACCOUNT | WARN (55) | NEW_PAYEE, BALANCE_DRAIN, FRESH_RECEIVER | MATCH | yes | 24 h | €6.07–€6.07 | €6.07 | €1,775.66 |
-| S2 | SAFE_ACCOUNT | BLOCK (120) | NEW_PAYEE, AMOUNT_SPIKE, BALANCE_DRAIN, VOP_NO_MATCH, FRESH_RECEIVER | NO_MATCH | no | – | €0.00–€0.00 | €0.00 | €0.00 |
-| S3 | SAFE_ACCOUNT | BLOCK (100) | NEW_PAYEE, AMOUNT_SPIKE, VOP_NO_MATCH, FRESH_RECEIVER | NO_MATCH | no | – | €0.00–€0.00 | €0.00 | €0.00 |
-| S4 | SAFE_ACCOUNT | ALLOW (20) | NEW_PAYEE | MATCH | yes | 24 h | €2,151.46–€2,151.46 | €2,151.46 | €0.00 |
-| S5 | SAFE_ACCOUNT | BLOCK (105) | NEW_PAYEE, AMOUNT_SPIKE, BALANCE_DRAIN, VOP_NO_MATCH | NO_MATCH | no | – | €0.00–€0.00 | €0.00 | €0.00 |
-| S6 | SAFE_ACCOUNT | WARN (60) | NEW_PAYEE, VOP_NO_MATCH | NO_MATCH | yes | 6 h | €110.14–€1,261.19 | €110.14 | €2,707.46 |
-| S7 | SAFE_ACCOUNT | BLOCK (105) | NEW_PAYEE, AMOUNT_SPIKE, BALANCE_DRAIN, VOP_NO_MATCH | NO_MATCH | no | – | €0.00–€0.00 | €0.00 | €0.00 |
-| S8 | SAFE_ACCOUNT | WARN (45) | NEW_PAYEE, AMOUNT_SPIKE | MATCH | yes | 24 h | €4,186.80–€4,186.80 | €4,186.80 | €0.00 |
+| S10 | SAFE_ACCOUNT | BLOCK (80) | NEW_PAYEE, AMOUNT_SPIKE, BALANCE_DRAIN, FRESH_RECEIVER | MATCH | no | – | €0.00–€0.00 | €0.00 | €0.00 |
+| S11 | SAFE_ACCOUNT | BLOCK (95) | NEW_PAYEE, BALANCE_DRAIN, VOP_NO_MATCH, FRESH_RECEIVER | NO_MATCH | no | – | €0.00–€0.00 | €0.00 | €0.00 |
+| S12 | SAFE_ACCOUNT | ALLOW (35) | NEW_PAYEE, FRESH_RECEIVER | MATCH | yes | 24 h | €8.61–€8.61 | €8.61 | €2,517.51 |
+| S2 | SAFE_ACCOUNT | BLOCK (75) | NEW_PAYEE, VOP_NO_MATCH, FRESH_RECEIVER | NO_MATCH | no | – | €0.00–€0.00 | €0.00 | €0.00 |
+| S3 | SAFE_ACCOUNT | BLOCK (75) | NEW_PAYEE, VOP_NO_MATCH, FRESH_RECEIVER | NO_MATCH | no | – | €0.00–€0.00 | €0.00 | €0.00 |
+| S4 | SAFE_ACCOUNT | WARN (45) | NEW_PAYEE, AMOUNT_SPIKE | MATCH | no | – | €0.00–€0.00 | €0.00 | €0.00 |
+| S5 | SAFE_ACCOUNT | WARN (60) | NEW_PAYEE, VOP_NO_MATCH | NO_MATCH | yes | 24 h | €1.50–€25.79 | €1.50 | €24.29 |
+| S6 | SAFE_ACCOUNT | BLOCK (105) | NEW_PAYEE, AMOUNT_SPIKE, BALANCE_DRAIN, VOP_NO_MATCH | NO_MATCH | no | – | €0.00–€0.00 | €0.00 | €0.00 |
+| S7 | SAFE_ACCOUNT | BLOCK (85) | NEW_PAYEE, AMOUNT_SPIKE, VOP_NO_MATCH | NO_MATCH | no | – | €0.00–€0.00 | €0.00 | €0.00 |
+| S8 | SAFE_ACCOUNT | WARN (45) | NEW_PAYEE, AMOUNT_SPIKE | MATCH | yes | 24 h | €5,426.65–€5,426.65 | €5,426.65 | €0.00 |
+| S9 | SAFE_ACCOUNT | BLOCK (85) | NEW_PAYEE, AMOUNT_SPIKE, VOP_NO_MATCH | NO_MATCH | no | – | €0.00–€0.00 | €0.00 | €0.00 |
+
+## Cases under FULL_CHAIN
+
+| Case | Kind | Decision (points) | Rules | VoP | Paid | Report after | Left on accounts (low–high) | Recovered | Lost |
+|---|---|---|---|---|---|---|---|---|---|
+| I1 | INVOICE_IBAN_CHANGE | BLOCK (75) | NEW_PAYEE, VOP_NO_MATCH, FRESH_RECEIVER | NO_MATCH | no | – | €0.00–€0.00 | €0.00 | €0.00 |
+| I10 | INVOICE_IBAN_CHANGE | WARN (60) | NEW_PAYEE, VOP_NO_MATCH | NO_MATCH | no | – | €0.00–€0.00 | €0.00 | €0.00 |
+| I11 | INVOICE_IBAN_CHANGE | BLOCK (75) | NEW_PAYEE, VOP_NO_MATCH, FRESH_RECEIVER | NO_MATCH | no | – | €0.00–€0.00 | €0.00 | €0.00 |
+| I12 | INVOICE_IBAN_CHANGE | BLOCK (75) | NEW_PAYEE, VOP_NO_MATCH, FRESH_RECEIVER | NO_MATCH | no | – | €0.00–€0.00 | €0.00 | €0.00 |
+| I2 | INVOICE_IBAN_CHANGE | WARN (60) | NEW_PAYEE, VOP_NO_MATCH | NO_MATCH | no | – | €0.00–€0.00 | €0.00 | €0.00 |
+| I3 | INVOICE_IBAN_CHANGE | BLOCK (75) | NEW_PAYEE, VOP_NO_MATCH, FRESH_RECEIVER | NO_MATCH | no | – | €0.00–€0.00 | €0.00 | €0.00 |
+| I4 | INVOICE_IBAN_CHANGE | WARN (60) | NEW_PAYEE, VOP_NO_MATCH | NO_MATCH | no | – | €0.00–€0.00 | €0.00 | €0.00 |
+| I5 | INVOICE_IBAN_CHANGE | WARN (60) | NEW_PAYEE, VOP_NO_MATCH | NO_MATCH | no | – | €0.00–€0.00 | €0.00 | €0.00 |
+| I6 | INVOICE_IBAN_CHANGE | WARN (60) | NEW_PAYEE, VOP_NO_MATCH | NO_MATCH | no | – | €0.00–€0.00 | €0.00 | €0.00 |
+| I7 | INVOICE_IBAN_CHANGE | WARN (60) | NEW_PAYEE, VOP_NO_MATCH | NO_MATCH | no | – | €0.00–€0.00 | €0.00 | €0.00 |
+| I8 | INVOICE_IBAN_CHANGE | BLOCK (75) | NEW_PAYEE, VOP_NO_MATCH, FRESH_RECEIVER | NO_MATCH | no | – | €0.00–€0.00 | €0.00 | €0.00 |
+| I9 | INVOICE_IBAN_CHANGE | BLOCK (75) | NEW_PAYEE, VOP_NO_MATCH, FRESH_RECEIVER | NO_MATCH | no | – | €0.00–€0.00 | €0.00 | €0.00 |
+| S1 | SAFE_ACCOUNT | BLOCK (85) | NEW_PAYEE, AMOUNT_SPIKE, VOP_NO_MATCH | NO_MATCH | no | – | €0.00–€0.00 | €0.00 | €0.00 |
+| S10 | SAFE_ACCOUNT | BLOCK (80) | NEW_PAYEE, AMOUNT_SPIKE, BALANCE_DRAIN, FRESH_RECEIVER | MATCH | no | – | €0.00–€0.00 | €0.00 | €0.00 |
+| S11 | SAFE_ACCOUNT | BLOCK (95) | NEW_PAYEE, BALANCE_DRAIN, VOP_NO_MATCH, FRESH_RECEIVER | NO_MATCH | no | – | €0.00–€0.00 | €0.00 | €0.00 |
+| S12 | SAFE_ACCOUNT | ALLOW (35) | NEW_PAYEE, FRESH_RECEIVER | MATCH | no | – | €0.00–€0.00 | €0.00 | €0.00 |
+| S2 | SAFE_ACCOUNT | BLOCK (75) | NEW_PAYEE, VOP_NO_MATCH, FRESH_RECEIVER | NO_MATCH | no | – | €0.00–€0.00 | €0.00 | €0.00 |
+| S3 | SAFE_ACCOUNT | BLOCK (75) | NEW_PAYEE, VOP_NO_MATCH, FRESH_RECEIVER | NO_MATCH | no | – | €0.00–€0.00 | €0.00 | €0.00 |
+| S4 | SAFE_ACCOUNT | WARN (45) | NEW_PAYEE, AMOUNT_SPIKE | MATCH | no | – | €0.00–€0.00 | €0.00 | €0.00 |
+| S5 | SAFE_ACCOUNT | WARN (60) | NEW_PAYEE, VOP_NO_MATCH | NO_MATCH | yes | 24 h | €1.50–€25.79 | €1.50 | €24.29 |
+| S6 | SAFE_ACCOUNT | BLOCK (105) | NEW_PAYEE, AMOUNT_SPIKE, BALANCE_DRAIN, VOP_NO_MATCH | NO_MATCH | no | – | €0.00–€0.00 | €0.00 | €0.00 |
+| S7 | SAFE_ACCOUNT | BLOCK (85) | NEW_PAYEE, AMOUNT_SPIKE, VOP_NO_MATCH | NO_MATCH | no | – | €0.00–€0.00 | €0.00 | €0.00 |
+| S8 | SAFE_ACCOUNT | WARN (45) | NEW_PAYEE, AMOUNT_SPIKE | MATCH | yes | 24 h | €5,426.65–€5,426.65 | €5,426.65 | €0.00 |
 | S9 | SAFE_ACCOUNT | BLOCK (85) | NEW_PAYEE, AMOUNT_SPIKE, VOP_NO_MATCH | NO_MATCH | no | – | €0.00–€0.00 | €0.00 | €0.00 |
 
 ## Who pays
@@ -158,9 +190,9 @@ system-wide tracing; this understates what cooperating banks may recover.
   CHAPS. Cap and excess are converted at the ECB rate of 2026-11-24 (£0.83700 per €1).
 - `EU_PSR_PROVISIONAL` follows the Council's position at first reading (21 October 2026),
   which is not in force. Under its art. 87(3) the payer's bank refunds when it cannot show
-  that both banks monitored the payment. No simulated policy has the receiving bank screen
-  incoming payments, so that rule decides almost every case; the sensitivity table below
-  applies the EU rules as if receiving banks did.
+  that both banks monitored the payment. Only `FULL_CHAIN` has the receiving bank screen
+  incoming payments, so under the other policies that rule decides every case; the
+  sensitivity table applies the EU rules as if receiving banks had screened.
 - `BR_MED` is applied as a what-if to euro payments. It returns blocked money and makes
   no bank pay for the loss.
 - Invoice scams hit businesses. Whether a business counts as a microenterprise is an
@@ -168,32 +200,39 @@ system-wide tracing; this understates what cooperating banks may recover.
 
 | Policy | Regime | Recovery | Paid scams | Covered | Loss | Victims | Sending banks | Receiving banks |
 |---|---|---|---|---|---|---|---|---|
-| NONE | UK_PSR | first receiving account only | 24 | 18 | €71,655.33 | €21,830.42 | €24,912.43 | €24,912.48 |
-| NONE | EU_PSR_PROVISIONAL | first receiving account only | 24 | 24 | €71,655.33 | €0.00 | €71,655.33 | €0.00 |
-| NONE | NO_REFUND | first receiving account only | 24 | 0 | €71,655.33 | €71,655.33 | €0.00 | €0.00 |
-| NONE | BR_MED | along the traced path | 24 | 0 | €50,932.69 | €50,932.69 | €0.00 | €0.00 |
-| SENDER_ONLY | UK_PSR | first receiving account only | 10 | 7 | €25,647.35 | €11,182.20 | €7,232.55 | €7,232.60 |
-| SENDER_ONLY | EU_PSR_PROVISIONAL | first receiving account only | 10 | 10 | €25,647.35 | €0.00 | €25,647.35 | €0.00 |
-| SENDER_ONLY | NO_REFUND | first receiving account only | 10 | 0 | €25,647.35 | €25,647.35 | €0.00 | €0.00 |
-| SENDER_ONLY | BR_MED | along the traced path | 10 | 0 | €25,647.35 | €25,647.35 | €0.00 | €0.00 |
-| SENDER_AND_RECEIVER | UK_PSR | first receiving account only | 10 | 7 | €7,407.18 | €3,163.00 | €2,122.08 | €2,122.10 |
-| SENDER_AND_RECEIVER | EU_PSR_PROVISIONAL | first receiving account only | 10 | 10 | €7,407.18 | €0.00 | €7,407.18 | €0.00 |
-| SENDER_AND_RECEIVER | NO_REFUND | first receiving account only | 10 | 0 | €7,407.18 | €7,407.18 | €0.00 | €0.00 |
-| SENDER_AND_RECEIVER | BR_MED | along the traced path | 10 | 0 | €7,407.18 | €7,407.18 | €0.00 | €0.00 |
+| NONE | UK_PSR | first receiving account only | 24 | 18 | €74,651.69 | €17,191.36 | €28,730.12 | €28,730.21 |
+| NONE | EU_PSR_PROVISIONAL | first receiving account only | 24 | 24 | €74,651.69 | €0.00 | €74,651.69 | €0.00 |
+| NONE | NO_REFUND | first receiving account only | 24 | 0 | €74,651.69 | €74,651.69 | €0.00 | €0.00 |
+| NONE | BR_MED | along the traced path | 24 | 0 | €62,732.37 | €62,732.37 | €0.00 | €0.00 |
+| SENDER_ONLY | UK_PSR | first receiving account only | 9 | 6 | €22,900.51 | €10,109.76 | €6,395.37 | €6,395.38 |
+| SENDER_ONLY | EU_PSR_PROVISIONAL | first receiving account only | 9 | 9 | €22,900.51 | €0.00 | €22,900.51 | €0.00 |
+| SENDER_ONLY | NO_REFUND | first receiving account only | 9 | 0 | €22,900.51 | €22,900.51 | €0.00 | €0.00 |
+| SENDER_ONLY | BR_MED | along the traced path | 9 | 0 | €22,900.51 | €22,900.51 | €0.00 | €0.00 |
+| SENDER_AND_RECEIVER | UK_PSR | first receiving account only | 9 | 6 | €5,975.09 | €3,577.05 | €1,199.02 | €1,199.02 |
+| SENDER_AND_RECEIVER | EU_PSR_PROVISIONAL | first receiving account only | 9 | 9 | €5,975.09 | €0.00 | €5,975.09 | €0.00 |
+| SENDER_AND_RECEIVER | NO_REFUND | first receiving account only | 9 | 0 | €5,975.09 | €5,975.09 | €0.00 | €0.00 |
+| SENDER_AND_RECEIVER | BR_MED | along the traced path | 9 | 0 | €5,975.09 | €5,975.09 | €0.00 | €0.00 |
+| FULL_CHAIN | UK_PSR | first receiving account only | 2 | 2 | €24.29 | €24.29 | €0.00 | €0.00 |
+| FULL_CHAIN | EU_PSR_PROVISIONAL | first receiving account only | 2 | 2 | €24.29 | €0.00 | €24.29 | €0.00 |
+| FULL_CHAIN | NO_REFUND | first receiving account only | 2 | 0 | €24.29 | €24.29 | €0.00 | €0.00 |
+| FULL_CHAIN | BR_MED | along the traced path | 2 | 0 | €24.29 | €24.29 | €0.00 | €0.00 |
 
 Sensitivity checks. Each row changes one or two assumptions; they are tests of the
 rules, not readings of them.
 
 | Variant | Policy | Regime | Covered | Victims | Banks |
 |---|---|---|---|---|---|
-| Ignoring a warning treated as gross negligence (a test; the UK rules set a high bar) | SENDER_ONLY | UK_PSR | 1 | €23,751.62 | €1,895.73 |
-| Ignoring a warning treated as gross negligence (a test; the UK rules set a high bar) | SENDER_AND_RECEIVER | UK_PSR | 1 | €7,407.18 | €0.00 |
-| Receiving banks also screen incoming payments | NONE | EU_PSR_PROVISIONAL | 24 | €0.00 | €71,655.33 |
-| Receiving banks also screen incoming payments | SENDER_ONLY | EU_PSR_PROVISIONAL | 4 | €15,086.89 | €10,560.46 |
-| Receiving banks also screen incoming payments | SENDER_AND_RECEIVER | EU_PSR_PROVISIONAL | 4 | €2,924.06 | €4,483.12 |
-| Receiving banks screen incoming payments, fraudsters did not use the bank's channels | NONE | EU_PSR_PROVISIONAL | 24 | €0.00 | €71,655.33 |
-| Receiving banks screen incoming payments, fraudsters did not use the bank's channels | SENDER_ONLY | EU_PSR_PROVISIONAL | 1 | €23,871.69 | €1,775.66 |
-| Receiving banks screen incoming payments, fraudsters did not use the bank's channels | SENDER_AND_RECEIVER | EU_PSR_PROVISIONAL | 1 | €5,631.52 | €1,775.66 |
+| Ignoring a warning treated as gross negligence (a test; the UK rules set a high bar) | SENDER_ONLY | UK_PSR | 1 | €20,502.47 | €2,398.04 |
+| Ignoring a warning treated as gross negligence (a test; the UK rules set a high bar) | SENDER_AND_RECEIVER | UK_PSR | 1 | €3,577.05 | €2,398.04 |
+| Ignoring a warning treated as gross negligence (a test; the UK rules set a high bar) | FULL_CHAIN | UK_PSR | 0 | €24.29 | €0.00 |
+| Receiving banks also screen incoming payments | NONE | EU_PSR_PROVISIONAL | 24 | €0.00 | €74,651.69 |
+| Receiving banks also screen incoming payments | SENDER_ONLY | EU_PSR_PROVISIONAL | 3 | €15,093.63 | €7,806.88 |
+| Receiving banks also screen incoming payments | SENDER_AND_RECEIVER | EU_PSR_PROVISIONAL | 3 | €3,433.29 | €2,541.80 |
+| Receiving banks also screen incoming payments | FULL_CHAIN | EU_PSR_PROVISIONAL | 2 | €0.00 | €24.29 |
+| Receiving banks screen incoming payments, fraudsters did not use the bank's channels | NONE | EU_PSR_PROVISIONAL | 24 | €0.00 | €74,651.69 |
+| Receiving banks screen incoming payments, fraudsters did not use the bank's channels | SENDER_ONLY | EU_PSR_PROVISIONAL | 0 | €22,900.51 | €0.00 |
+| Receiving banks screen incoming payments, fraudsters did not use the bank's channels | SENDER_AND_RECEIVER | EU_PSR_PROVISIONAL | 0 | €5,975.09 | €0.00 |
+| Receiving banks screen incoming payments, fraudsters did not use the bank's channels | FULL_CHAIN | EU_PSR_PROVISIONAL | 0 | €24.29 | €0.00 |
 
 Under `NONE` the sending bank does not monitor either, so EU art. 87(3) still applies in
 the receiving-bank variants.
@@ -229,6 +268,7 @@ Settings used: `sending_psp_applies_excess=True`, `victims_report_to_police_and_
 | `p_large_purchase` | 0.004 |
 | `p_typo` | 0.04 |
 | `p_trading_name` | 0.05 |
+| `new_account_gifts` | 6 |
 
 ## Risk rules (RiskConfig)
 

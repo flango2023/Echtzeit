@@ -56,6 +56,11 @@ def render_spread(runs: dict[int, list[SimulationResult]]) -> list[str]:
             "{:.1%}",
         ),
         ("Normal payments warned or blocked", lambda r: r.legit.flagged_share, "{:.1%}"),
+        (
+            "Normal payments held back by the receiving bank",
+            lambda r: r.legit.held_back_by_receiver / max(1, r.legit.payments),
+            "{:.1%}",
+        ),
     ]
     for regime in REGIMES:
 
@@ -130,12 +135,20 @@ def render(
         [str(sum(c.warned_and_ignored for c in r.cases)) for r in results],
     )
     row("Receiving-side freezes", [str(r.receiver_freezes) for r in results])
+    row(
+        "Scam payments held back by the receiving bank",
+        [str(sum(c.held_back for c in r.cases)) for r in results],
+    )
     row("Normal payments", [str(r.legit.payments) for r in results])
     row(
         "Normal payments warned",
         [f"{r.legit.warned} ({r.legit.warned / max(1, r.legit.payments):.1%})" for r in results],
     )
     row("Normal payments blocked", [str(r.legit.blocked) for r in results])
+    row(
+        "Normal payments held back by the receiving bank",
+        [str(r.legit.held_back_by_receiver) for r in results],
+    )
     row("Normal payments refused by the bank", [str(r.legit.refused_by_bank) for r in results])
     for percent in (50, 95, 99):
         row(f"Assessment time p{percent}", [_ms(r.latency_percentile(percent)) for r in results])
@@ -207,9 +220,9 @@ def render_liability(results: list[SimulationResult]) -> list[str]:
         ),
         "- `EU_PSR_PROVISIONAL` follows the Council's position at first reading (21 October 2026),",
         "  which is not in force. Under its art. 87(3) the payer's bank refunds when it cannot show",
-        "  that both banks monitored the payment. No simulated policy has the receiving bank screen",
-        "  incoming payments, so that rule decides almost every case; the sensitivity table below",
-        "  applies the EU rules as if receiving banks did.",
+        "  that both banks monitored the payment. Only `FULL_CHAIN` has the receiving bank screen",
+        "  incoming payments, so under the other policies that rule decides every case; the",
+        "  sensitivity table applies the EU rules as if receiving banks had screened.",
         "- `BR_MED` is applied as a what-if to euro payments. It returns blocked money and makes",
         "  no bank pay for the loss.",
         "- Invoice scams hit businesses. Whether a business counts as a microenterprise is an",

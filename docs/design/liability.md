@@ -65,9 +65,10 @@ sources read. The rules modelled:
 - Art. 50(1a). A transaction is unauthorised only if a third party initiated or modified it.
 - Art. 27(1). Business users may contract out of several articles, but not of 50(1a), 60, 68
   or 87.
-- Art. 73(3) is not modelled. It lets the payee's PSP hold back and return suspicious incoming
-  funds, and requires it when the case is clear and incontrovertible. No simulated policy
-  screens incoming payments.
+- Art. 73(3). It lets the payee's PSP hold back and return suspicious incoming funds, and
+  requires it when the case is clear and incontrovertible. The decision may not rest solely on
+  the payee-name check. The `FULL_CHAIN` policy's incoming screen follows this; its rules and
+  threshold are this project's.
 
 Brazil (both from the Banco Central do Brasil, read directly):
 
@@ -87,10 +88,11 @@ Brazil (both from the Banco Central do Brasil, read directly):
 - The UK and Brazilian regimes are applied as what-ifs to simulated euro payments. The
   sterling cap and excess are converted at the ECB reference rate of 24 November 2026
   (£0.83700 per €1).
-- EU art. 87(3): a sending bank that scores payments counts as monitoring. No simulated policy
-  has the receiving bank screen incoming payments before crediting them, so by default
-  art. 87(3) decides every EU case and the payer's PSP pays. A sensitivity check applies the
-  rules as if receiving banks did screen.
+- EU art. 87(3): a sending bank that scores payments counts as monitoring, and a receiving
+  bank counts as monitoring when the `FULL_CHAIN` incoming screen checked the payment. Under
+  the other policies the receiving bank does not screen incoming payments, so art. 87(3)
+  decides every EU case and the payer's PSP pays. A sensitivity check applies the rules as if
+  receiving banks had screened under every policy.
 - EU art. 68(2): a payment counts as executed despite justified suspicion when the bank's own
   score warned about it and a rule other than unusualness (new payee, amount, balance share)
   or the payee-name check fired. That is, `FRESH_RECEIVER` or `PASS_THROUGH`. The Regulation
@@ -113,15 +115,16 @@ Brazil (both from the Banco Central do Brasil, read directly):
 | `sending_psp_applies_excess` | yes | UK victims carry up to £100 per claim |
 | `victims_report_to_police_and_psp` | yes | condition of the UK claim and of EU art. 60; reporting also starts the freeze |
 | `impersonation_via_bank_channels` | yes | condition of EU art. 60 |
-| `receiving_banks_monitor_incoming` | no | whether EU art. 87(3) is met on the receiving side |
+| `receiving_banks_monitor_incoming` | no | treats every scored case as screened by the payee's bank, as a sensitivity check; `FULL_CHAIN` cases are screened anyway |
 | `ignored_warning_is_gross_negligence` | no | a sensitivity test. The UK rules set a high bar for gross negligence. In the EU it only affects art. 60, because art. 87 and 68 protect the payer unless the payer acted fraudulently. |
 
 ## Not modelled
 
 Claim deadlines and time limits for reimbursement (the simulated victims report within days),
 vulnerability assessments, first-party fraud, the "stop the clock" mechanism, liability for
-failing to offer Verification of Payee (the simulation always runs it), EU art. 73(3) and any
-regime outside the four above. For `BR_MED`: re-blocking when new money reaches a blocked
+failing to offer Verification of Payee (the simulation always runs it), the payee PSP's own
+liability under EU art. 73(3) when it fails to hold back a clear case, and any regime outside
+the four above. For `BR_MED`: re-blocking when new money reaches a blocked
 account, the DICT's own prioritisation algorithm (the simulation's trace is used instead) and
 the analysis step in which a receiving PSP may reject a notification.
 

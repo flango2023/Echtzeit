@@ -154,3 +154,20 @@ def test_victim_types_follow_the_scenario(results):
             assert case.victim_type == "CONSUMER"
         else:
             assert case.victim_type in {"MICROENTERPRISE", "OTHER_BUSINESS"}
+
+
+def test_full_chain_screens_incoming_payments(results):
+    full = results[Policy.FULL_CHAIN]
+    others = [results[p] for p in Policy if p is not Policy.FULL_CHAIN]
+    assert all(not c.held_back and not c.receiver_screened for r in others for c in r.cases)
+    assert all(c.receiver_screened for c in full.cases if c.decision is not None)
+    for case in full.cases:
+        if case.held_back:
+            assert not case.executed and case.prevented_cents == case.attempted_cents
+    legit = full.legit
+    assert legit.payments == legit.allowed + legit.warned + legit.blocked
+    assert legit.held_back_by_receiver <= legit.allowed + legit.warned_and_went_ahead
+    # Sending-side decisions are the same as without incoming screening.
+    assert [c.decision for c in full.cases] == [
+        c.decision for c in results[Policy.SENDER_AND_RECEIVER].cases
+    ]

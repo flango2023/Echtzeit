@@ -22,7 +22,7 @@ from sqlalchemy.orm import aliased
 
 from echtzeit.ledger import Ledger
 from echtzeit.models import SYSTEM, Account, Transfer, to_db_time
-from echtzeit.vop import VopOutcome, VopResult, verify_payee
+from echtzeit.vop import VopOutcome, VopResult, compare_names, verify_payee
 
 
 class Decision(Enum):
@@ -224,3 +224,95 @@ def recent_incoming_uetrs(
             .order_by(Transfer.created_at.desc())
         ).all()
     return [(uetr, amount) for uetr, amount in rows]
+
+
+# -- receiving side ---------------------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class IncomingConfig:
+    """Rules the payee's bank applies before crediting an incoming payment. Not calibrated."""
+
+    name_mismatch: int = 30
+    first_credit: int = 25
+    large_first_credit: int = 20
+    large_credit_factor: int = 3  # above this many times the largest earlier credit
+    large_credit_min_cents: int = 100_000
+    hold_at: int = 45
+
+
+# Rules that are about the payee's name only. EU PSR art. 73(3) (Council position at first
+# reading) does not allow the decision to rest solely on the payee-name check.
+_NAME_ONLY = frozenset({"NAME_MISMATCH"})
+
+
+@dataclass(frozen=True)
+class IncomingAssessment:
+    hold_back: bool
+    points: int
+    reasons: list[Reason]
+
+    def fired(self, rule: str) -> bool:
+        return any(reason.rule == rule for reason in self.reasons)
+
+
+class IncomingScreen:
+    """Screens a payment before the payee's bank makes the money available.
+
+    A payment is held back (and returned to the payer's bank) when the points reach `hold_at`
+    and at least one rule other than the name check fired.
+    """
+
+    def __init__(self, ledger: Ledger, config: IncomingConfig | None = None):
+        self._ledger = ledger
+        self.config = config or IncomingConfig()
+
+    def assess(
+        self, *, creditor_id: str, named_creditor: str, amount_cents: int, at: datetime
+    ) -> IncomingAssessment:
+        cfg = self.config
+        moment = to_db_time(at)
+        creditor = self._ledger.account_info(creditor_id)
+        sender = aliased(Account)
+        with self._ledger.transaction() as session:
+            earlier = session.execute(
+                select(func.count(Transfer.id), func.max(Transfer.amount_cents))
+                .join(sender, sender.id == Transfer.debtor_id)
+                .where(
+                    Transfer.creditor_id == creditor_id,
+                    Transfer.created_at < moment,
+                    sender.kind != SYSTEM,
+                )
+            ).one()
+        count, largest = earlier
+        reasons: list[Reason] = []
+        outcome, _ = compare_names(named_creditor, creditor.holder_name)
+        if outcome is VopOutcome.NO_MATCH:
+            reasons.append(
+                Reason(
+                    "NAME_MISMATCH",
+                    cfg.name_mismatch,
+                    "the payer named someone other than the account holder",
+                )
+            )
+        if count == 0:
+            reasons.append(
+                Reason(
+                    "FIRST_CREDIT",
+                    cfg.first_credit,
+                    "first payment from another customer to this account",
+                )
+            )
+        if amount_cents >= cfg.large_credit_min_cents and (
+            largest is None or amount_cents > cfg.large_credit_factor * largest
+        ):
+            reasons.append(
+                Reason(
+                    "LARGE_FIRST_CREDIT",
+                    cfg.large_first_credit,
+                    "much larger than any earlier payment to this account",
+                )
+            )
+        points = sum(reason.points for reason in reasons)
+        beyond_name = any(reason.rule not in _NAME_ONLY for reason in reasons)
+        return IncomingAssessment(points >= cfg.hold_at and beyond_name, points, reasons)

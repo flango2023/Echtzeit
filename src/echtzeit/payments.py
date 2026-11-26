@@ -8,11 +8,16 @@ that fails produces a rejection:
 3. A request already completed under the same key is answered as accepted again, whatever its
    age. The same key with different content is rejected as AM05 (duplicate).
 4. A message older than the execution time limit is rejected as AB05, and no money moves.
-5. The debtor must cover the amount. Otherwise MS03.
+5. If the processor has an incoming screen (the payee's bank checking the payment before it
+   makes the money available) and the screen holds the payment back, RR04. Nothing moves.
+6. The debtor must cover the amount. Otherwise MS03.
 
 Step 3 comes before step 4 on purpose. If a payment was completed and the originator retries
 after the time limit, answering "timed out" would tell the originator that the payment failed
 while the money has moved. That mismatch is the main hazard of timeouts in instant payments.
+
+The EPC list has no code for a payment held back as suspected fraud. RR04 (regulatory reason)
+is used for it; that mapping is this project's choice, like MS03 below.
 
 About the reason codes: the EPC guidelines list no code for "insufficient funds" in the
 inter-PSP rejection, because a real originator PSP refuses such a payment before it creates a
@@ -37,7 +42,7 @@ from datetime import UTC, datetime, timedelta
 from echtzeit.audit import AuditLog
 from echtzeit.errors import IdempotencyConflict, InsufficientFunds
 from echtzeit.iso20022 import pacs002, pacs008
-from echtzeit.ledger import Ledger, TransferResult
+from echtzeit.ledger import AccountInfo, Ledger, TransferResult
 
 # The Instant Payments Regulation and the SCT Inst scheme require funds to be available
 # to the beneficiary within 10 seconds.
@@ -48,6 +53,10 @@ WRONG_BANK_IDENTIFIER = "RC01"
 DUPLICATE = "AM05"
 TIMEOUT = "AB05"
 NOT_SPECIFIED = "MS03"
+HELD_BACK = "RR04"
+
+# Called with the message, the creditor account and the current time; True holds it back.
+IncomingScreenHook = Callable[[pacs008.CreditTransfer, AccountInfo, datetime], bool]
 
 
 @dataclass(frozen=True)
@@ -74,8 +83,10 @@ class InstantPaymentProcessor:
         audit: AuditLog,
         clock: Callable[[], datetime] = lambda: datetime.now(UTC),
         timeout: timedelta = EXECUTION_TIMEOUT,
+        incoming_screen: IncomingScreenHook | None = None,
     ):
         self._ledger = ledger
+        self._incoming_screen = incoming_screen
         self._audit = audit
         self._clock = clock
         self._timeout = timeout
@@ -114,6 +125,9 @@ class InstantPaymentProcessor:
 
         if now - message.accepted_at > self._timeout:
             return self._reject(message, key, now, TIMEOUT)
+
+        if self._incoming_screen is not None and self._incoming_screen(message, creditor, now):
+            return self._reject(message, key, now, HELD_BACK)
 
         try:
             transfer = self._ledger.transfer(**request, booked_at=now)

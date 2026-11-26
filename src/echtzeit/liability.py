@@ -215,7 +215,8 @@ EU_PSR_PROVISIONAL = Regime(
         ),
         (
             "Art. 73(3), the payee PSP holding back and returning suspicious incoming funds, is "
-            "not modelled: no simulated policy screens incoming payments."
+            "modelled by the FULL_CHAIN policy's incoming screen; the screen's rules are this "
+            "project's, not the Regulation's."
         ),
         (
             "Who finally carries a refund between the two PSPs is not set out in the articles "
@@ -296,8 +297,9 @@ class Assumptions:
     # EU art. 60 needs the fraudster to have used channels attributed to the victim's PSP
     # (for example a spoofed phone number). Whether the simulated fraudsters did is unknown.
     impersonation_via_bank_channels: bool = True
-    # No simulated policy screens incoming payments before they are credited, which EU art. 87(3)
-    # requires of the payee's PSP. Switching this on tests the EU rules as if they did.
+    # Only the FULL_CHAIN policy screens incoming payments before they are credited, which EU
+    # art. 87(3) requires of the payee's PSP. Switching this on treats every scored case as if
+    # the payee's bank had screened it.
     receiving_banks_monitor_incoming: bool = False
     # Ignoring a bank warning is not gross negligence by itself under the UK rules, which set
     # a high bar. Switching this on is a sensitivity test, not a reading of the rules.
@@ -412,7 +414,8 @@ def allocate(case: CaseOutcome, regime: Regime, assumptions: Assumptions) -> All
 def _eu_rule(case: CaseOutcome, assumptions: Assumptions) -> str | None:
     """The first EU rule that makes the payer's PSP carry the loss, or None."""
     sender_monitored = case.decision is not None  # the simulation scores only when monitoring
-    if not (sender_monitored and assumptions.receiving_banks_monitor_incoming):
+    receiver_monitored = case.receiver_screened or assumptions.receiving_banks_monitor_incoming
+    if not (sender_monitored and receiver_monitored):
         return "art. 87(3): monitoring by both PSPs not shown"
     if case.decision == "WARN" and SUSPICION_RULES & set(case.reasons):
         return "art. 68(2): executed despite justified suspicion"
