@@ -11,9 +11,11 @@ Regimes in version 1:
   Faster Payments and CHAPS, in force since 7 October 2024. Applied here *as if* the
   simulated euro payments were UK payments, with the sterling cap and excess converted at a
   fixed ECB reference rate. That is a what-if, not a statement about any real case.
-* EU_PSR_PROVISIONAL: the consumer refund for fraud where the fraudster impersonates the
-  consumer's PSP, from the provisional agreement on the EU Payment Services Regulation
-  (27 November 2025). Not adopted and not in force when checked; the final text may differ.
+* EU_PSR_PROVISIONAL: the EU Payment Services Regulation as in the Council's position at first
+  reading (document 8543/26, 21 October 2026). Not adopted and not in force when checked.
+  Modelled rules: transaction monitoring by both PSPs (art. 87(3)), refusal of instant payments
+  under justified suspicion (art. 68(2)), the consumer refund for PSP impersonation (art. 60)
+  and the definition of authorisation (art. 50(1a)).
 * NO_REFUND: no reimbursement rule. The victim bears the loss. This stands in for markets
   without a refund rule.
 * BR_MED: Brazil's Pix Special Return Mechanism with funds recovery (Resolução BCB 493/2025
@@ -47,6 +49,14 @@ class Recovery(Enum):
 
     FIRST_HOP = "first receiving account only"
     TRACING = "along the traced path"
+
+
+class Method(Enum):
+    """How a regime decides who pays."""
+
+    NONE = "no PSP refund"
+    REFUND_SPLIT = "refund shared between PSPs"  # UK
+    EU_PSR = "EU PSR monitoring, suspension and impersonation rules"
 
 
 class Status(Enum):
@@ -93,6 +103,7 @@ class Regime:
     # contribution by this amount (UK: 50% of the maximum excess).
     receiving_deduction_without_excess_cents: int
     recovery: Recovery
+    method: Method
     sources: tuple[Source, ...]
     notes: tuple[str, ...] = ()
 
@@ -110,6 +121,7 @@ UK_PSR = Regime(
     receiving_share=Decimal("0.5"),
     receiving_deduction_without_excess_cents=gbp_pence_to_eur_cents(5_000),  # £50
     recovery=Recovery.FIRST_HOP,
+    method=Method.REFUND_SPLIT,
     sources=(
         Source(
             "PSR, APP fraud reimbursement protections (consumer page)",
@@ -150,47 +162,64 @@ UK_PSR = Regime(
 
 EU_PSR_PROVISIONAL = Regime(
     code="EU_PSR_PROVISIONAL",
-    name="EU PSR consumer refund for PSP impersonation (provisional)",
+    name="EU Payment Services Regulation, Council position at first reading (not in force)",
     status=Status.PROVISIONAL,
-    covered_victims=frozenset({VictimType.CONSUMER}),
-    covered_kinds=frozenset({"SAFE_ACCOUNT"}),
+    covered_victims=frozenset(VictimType),  # art. 87 and 68 protect every payer
+    covered_kinds=None,
     cap_cents=None,
     max_excess_cents=0,
     receiving_share=Decimal(0),
     receiving_deduction_without_excess_cents=0,
     recovery=Recovery.FIRST_HOP,
+    method=Method.EU_PSR,
     sources=(
         Source(
-            "Council of the EU, press release of 27 November 2025 on the payment services deal",
+            "Council of the EU, Position at first reading on the Payment Services Regulation, "
+            "document 8543/26 of 21 October 2026",
+            "https://data.consilium.europa.eu/doc/document/ST-8543-2026-INIT/en/pdf",
+            True,
+            "art. 87(3): both PSPs must monitor, the payer's PSP before execution and the payee's "
+            "PSP before funds are made available; a PSP that does not is liable, and the payer's "
+            "PSP refunds when it cannot show both monitored. Art. 68(2): with objectively "
+            "justified suspicion, not solely from Verification of Payee, the payer's PSP must "
+            "refuse an instant payment, otherwise the payer bears no loss; an unusual order is "
+            "not by itself such a reason (art. 68(4)). Art. 60: full refund to a consumer "
+            "manipulated through channels attributed to its PSP, within 15 business days, unless "
+            "the consumer acted fraudulently or with gross negligence. Art. 50(1a): only "
+            "transactions initiated or modified by a third party are unauthorised. Art. 27(1): "
+            "articles 60, 68 and 87 are not among those business users may contract out of",
+        ),
+        Source(
+            "Council of the EU, final compromise text, document 8221/26 of 17 April 2026, and "
+            "'I' item note 8220/26",
+            "https://data.consilium.europa.eu/doc/document/ST-8221-2026-INIT/en/pdf",
+            True,
+            "the same rules under earlier article numbers (59, 65, 83, 49)",
+        ),
+        Source(
+            "Council of the EU, press release of 27 November 2025",
             "https://www.consilium.europa.eu/en/press/press-releases/2025/11/27/payment-services-council-and-parliament-agree-to-step-up-the-fight-against-fraud-and-increase-transparency/",
             True,
-            "provisional agreement; spoofing fraud where fraudsters impersonate the customer's "
-            "PSP; PSPs liable when they do not use required preventive tools",
-        ),
-        Source(
-            "European Parliament, press release 20251121IPR31540 (read through search-result "
-            "excerpts; the page refused automated access)",
-            "https://www.europarl.europa.eu/news/en/press-room/20251121IPR31540/payment-services-deal-more-protection-from-online-fraud-and-hidden-fees",
-            True,
-            "full refund when a scammer posing as a PSP employee tricks the customer, if the "
-            "customer reports to the police and informs the PSP; receiving PSP must freeze "
-            "transactions it finds suspicious",
-        ),
-        Source(
-            "European Parliament, answer to written question E-000069/26",
-            "https://www.europarl.europa.eu/doceo/document/E-10-2026-000069-ASW_EN.html",
-            True,
-            "the refund right is for consumers",
+            "provisional political agreement",
         ),
     ),
     notes=(
         (
-            "Provisional text, not in force. The refund is paid by the consumer's own PSP; no "
-            "split with the receiving PSP is modelled."
+            "Not in force: the Council adopted its first-reading position on 21 October 2026; "
+            "the Parliament's second reading was not confirmed in the sources read."
         ),
         (
-            "A change of IBAN on an invoice is treated as an authorised payment, not as a "
-            "transaction initiated or changed by the fraudster, so it is not covered."
+            "Interpretation: a payment the PSP's own monitoring warned about counts as "
+            "objectively justified suspicion only if a rule other than unusualness (new payee, "
+            "amount, balance share) and Verification of Payee fired."
+        ),
+        (
+            "Art. 73(3), the payee PSP holding back and returning suspicious incoming funds, is "
+            "not modelled: no simulated policy screens incoming payments."
+        ),
+        (
+            "Who finally carries a refund between the two PSPs is not set out in the articles "
+            "read; the payer's PSP pays it here."
         ),
     ),
 )
@@ -206,6 +235,7 @@ NO_REFUND = Regime(
     receiving_share=Decimal(0),
     receiving_deduction_without_excess_cents=0,
     recovery=Recovery.FIRST_HOP,
+    method=Method.NONE,
     sources=(),
     notes=("The victim bears every loss that is not recovered.",),
 )
@@ -221,6 +251,7 @@ BR_MED = Regime(
     receiving_share=Decimal(0),
     receiving_deduction_without_excess_cents=0,
     recovery=Recovery.TRACING,
+    method=Method.NONE,
     sources=(
         Source(
             "Banco Central do Brasil, Resolução BCB nº 493, de 28 de agosto de 2025",
@@ -262,9 +293,19 @@ class Assumptions:
 
     sending_psp_applies_excess: bool = True
     victims_report_to_police_and_psp: bool = True
+    # EU art. 60 needs the fraudster to have used channels attributed to the victim's PSP
+    # (for example a spoofed phone number). Whether the simulated fraudsters did is unknown.
+    impersonation_via_bank_channels: bool = True
+    # No simulated policy screens incoming payments before they are credited, which EU art. 87(3)
+    # requires of the payee's PSP. Switching this on tests the EU rules as if they did.
+    receiving_banks_monitor_incoming: bool = False
     # Ignoring a bank warning is not gross negligence by itself under the UK rules, which set
     # a high bar. Switching this on is a sensitivity test, not a reading of the rules.
     ignored_warning_is_gross_negligence: bool = False
+
+
+# Rules that signal more than an unusual payment or a payee-name result (EU art. 68(2) and (4)).
+SUSPICION_RULES = frozenset({"FRESH_RECEIVER", "PASS_THROUGH"})
 
 
 @dataclass(frozen=True)
@@ -314,6 +355,15 @@ def allocate(case: CaseOutcome, regime: Regime, assumptions: Assumptions) -> All
     def uncovered(reason: str) -> Allocation:
         return Allocation(case.case_id, regime.code, False, reason, loss, loss, 0, 0)
 
+    if regime.method is Method.EU_PSR:
+        reason = _eu_rule(case, assumptions)
+        if reason is None:
+            return uncovered("no EU rule moves this loss to a PSP")
+        # The payer bears no loss; the payer's PSP pays it, after the money it recovered.
+        return Allocation(
+            case.case_id, regime.code, True, reason, loss, 0, loss, 0, refunded_cents=paid
+        )
+
     if victim_type not in regime.covered_victims:
         return uncovered(f"victim type {victim_type.value} not covered")
     if regime.covered_kinds is not None and case.kind not in regime.covered_kinds:
@@ -357,6 +407,24 @@ def allocate(case: CaseOutcome, regime: Regime, assumptions: Assumptions) -> All
         excess_cents=excess,
         above_cap_cents=above_cap,
     )
+
+
+def _eu_rule(case: CaseOutcome, assumptions: Assumptions) -> str | None:
+    """The first EU rule that makes the payer's PSP carry the loss, or None."""
+    sender_monitored = case.decision is not None  # the simulation scores only when monitoring
+    if not (sender_monitored and assumptions.receiving_banks_monitor_incoming):
+        return "art. 87(3): monitoring by both PSPs not shown"
+    if case.decision == "WARN" and SUSPICION_RULES & set(case.reasons):
+        return "art. 68(2): executed despite justified suspicion"
+    if (
+        case.kind == "SAFE_ACCOUNT"
+        and VictimType(case.victim_type) is VictimType.CONSUMER
+        and assumptions.impersonation_via_bank_channels
+        and assumptions.victims_report_to_police_and_psp
+        and not (assumptions.ignored_warning_is_gross_negligence and case.warned_and_ignored)
+    ):
+        return "art. 60: PSP impersonation refund"
+    return None
 
 
 def totals(cases: list[CaseOutcome], regime: Regime, assumptions: Assumptions) -> Totals:

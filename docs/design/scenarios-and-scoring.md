@@ -13,11 +13,12 @@ recovered under three policies, and what does that cost normal customers?
 | `SENDER_ONLY` | The sending bank checks the payee name and scores every payment: allow, warn or block. |
 | `SENDER_AND_RECEIVER` | As above. When an outgoing payment is blocked because money is passing straight through an account, that bank also freezes the money that just arrived. |
 
-The receiving-side freeze models the provisional EU Payment Services Regulation, under which
-the receiving provider must freeze transactions it finds suspicious (European Parliament press
-release 20251121IPR31540, read through search-result excerpts because the page refused
-automated access). The final legal text is not yet adopted, and this simulator does not claim
-to implement it.
+The receiving-side freeze acts when the money tries to leave the account. It is not the EU
+rule. Under art. 73(3) of the EU Payment Services Regulation, in the Council's position at
+first reading of 21 October 2026, the payee's PSP may hold back suspicious funds when they
+arrive and return them. It must do so when the reasons are clear and incontrovertible. No
+policy here screens incoming payments, which also matters for EU liability (see
+[liability.md](liability.md)). The Regulation is not in force.
 
 ## Scenario patterns and their sources
 

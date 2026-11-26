@@ -11,7 +11,9 @@ The same population and schedule run under three policies:
 * SENDER_ONLY: the sending side scores every payment and warns or blocks.
 * SENDER_AND_RECEIVER: as SENDER_ONLY, and when an outgoing payment is blocked because money is
   passing straight through an account, that bank also freezes the money that just arrived.
-  This models the receiving-PSP freeze in the provisional EU Payment Services Regulation.
+  The bank acts when the money tries to leave. This differs from EU PSR art. 73(3) (Council
+  position at first reading), under which the payee's PSP may hold back suspicious funds when
+  they arrive; no policy here screens incoming payments.
 
 Scenario patterns, paraphrased from the EPC 2025 Payments Threats and Fraud Trends Report
 (EPC162-24, version 2.0, 19 November 2025):

@@ -205,8 +205,11 @@ def render_liability(results: list[SimulationResult]) -> list[str]:
             f"  CHAPS. Cap and excess are converted at the ECB rate of {ECB_RATE_DATE} "
             f"(£{ECB_GBP_PER_EUR} per €1)."
         ),
-        "- `EU_PSR_PROVISIONAL` follows a provisional agreement that is not in force. The final",
-        "  text may differ.",
+        "- `EU_PSR_PROVISIONAL` follows the Council's position at first reading (21 October 2026),",
+        "  which is not in force. Under its art. 87(3) the payer's bank refunds when it cannot show",
+        "  that both banks monitored the payment. No simulated policy has the receiving bank screen",
+        "  incoming payments, so that rule decides almost every case; the sensitivity table below",
+        "  applies the EU rules as if receiving banks did.",
         "- `BR_MED` is applied as a what-if to euro payments. It returns blocked money and makes",
         "  no bank pay for the loss.",
         "- Invoice scams hit businesses. Whether a business counts as a microenterprise is an",
@@ -223,24 +226,47 @@ def render_liability(results: list[SimulationResult]) -> list[str]:
                 f"| {t.covered} | {euro(t.loss_cents)} "
                 f"| {euro(t.victim_cents)} | {euro(t.sending_psp_cents)} | {euro(t.receiving_psp_cents)} |"
             )
-    strict = Assumptions(ignored_warning_is_gross_negligence=True)
-    lines += [
-        "",
-        "Sensitivity: if ignoring a bank warning were treated as gross negligence (the UK rules",
-        "set a high bar for gross negligence, so this is a test, not a reading of the rules):",
-        "",
-        "| Policy | Regime | Covered | Victims | Banks |",
-        "|---|---|---|---|---|",
+    variants = [
+        (
+            "Ignoring a warning treated as gross negligence (a test; the UK rules set a high bar)",
+            Assumptions(ignored_warning_is_gross_negligence=True),
+            [r for r in REGIMES if r.code == "UK_PSR"],
+        ),
+        (
+            "Receiving banks also screen incoming payments",
+            Assumptions(receiving_banks_monitor_incoming=True),
+            [r for r in REGIMES if r.code == "EU_PSR_PROVISIONAL"],
+        ),
+        (
+            "Receiving banks screen incoming payments, fraudsters did not use the bank's channels",
+            Assumptions(
+                receiving_banks_monitor_incoming=True, impersonation_via_bank_channels=False
+            ),
+            [r for r in REGIMES if r.code == "EU_PSR_PROVISIONAL"],
+        ),
     ]
-    for result in results:
-        if result.policy.value == "NONE":
-            continue  # nobody is warned when nothing is scored
-        for regime in REGIMES[:2]:
-            t = totals(result.cases, regime, strict)
-            lines.append(
-                f"| {result.policy.value} | {regime.code} | {t.covered} | {euro(t.victim_cents)} | {euro(t.psp_cents)} |"
-            )
     lines += [
+        "",
+        "Sensitivity checks. Each row changes one or two assumptions; they are tests of the",
+        "rules, not readings of them.",
+        "",
+        "| Variant | Policy | Regime | Covered | Victims | Banks |",
+        "|---|---|---|---|---|---|",
+    ]
+    for label, variant, regimes in variants:
+        for result in results:
+            if result.policy.value == "NONE" and variant.ignored_warning_is_gross_negligence:
+                continue  # nobody is warned when nothing is scored
+            for regime in regimes:
+                t = totals(result.cases, regime, variant)
+                lines.append(
+                    f"| {label} | {result.policy.value} | {regime.code} | {t.covered} "
+                    f"| {euro(t.victim_cents)} | {euro(t.psp_cents)} |"
+                )
+    lines += [
+        "",
+        "Under `NONE` the sending bank does not monitor either, so EU art. 87(3) still applies in",
+        "the receiving-bank variants.",
         "",
         "Settings used: " + ", ".join(f"`{k}={v}`" for k, v in vars(assumptions).items()) + ".",
         "",

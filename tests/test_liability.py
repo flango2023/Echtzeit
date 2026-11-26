@@ -110,24 +110,83 @@ def test_uk_scope_by_victim_type(victim_type, covered):
         assert parts(a) == (500_000, 0, 0)
 
 
-def test_eu_refunds_a_consumer_impersonation_scam_in_full_from_the_sending_bank():
-    a = allocate(case(recovered_cents=100_000), EU_PSR_PROVISIONAL, DEFAULT)
-    assert a.covered
-    assert parts(a) == (0, 400_000, 0)
+MONITORED = Assumptions(receiving_banks_monitor_incoming=True)
 
 
-@pytest.mark.parametrize(
-    "changes",
-    [
-        {"kind": "INVOICE_IBAN_CHANGE", "victim_type": "MICROENTERPRISE"},
-        {"kind": "INVOICE_IBAN_CHANGE", "victim_type": "CONSUMER"},
-        {"victim_type": "MICROENTERPRISE"},
-    ],
-)
-def test_eu_covers_only_consumers_and_only_impersonation(changes):
-    a = allocate(case(**changes), EU_PSR_PROVISIONAL, DEFAULT)
+def test_eu_without_monitoring_by_both_banks_the_payers_bank_carries_the_loss():
+    """Art. 87(3): no scoring at all, or no screening of incoming payments by the payee's bank."""
+    for victim_type, kind in (
+        ("CONSUMER", "SAFE_ACCOUNT"),
+        ("OTHER_BUSINESS", "INVOICE_IBAN_CHANGE"),
+    ):
+        unscored = case(victim_type=victim_type, kind=kind, recovered_cents=100_000)
+        a = allocate(unscored, EU_PSR_PROVISIONAL, DEFAULT)
+        assert a.covered and a.reason.startswith("art. 87(3)")
+        assert parts(a) == (0, 400_000, 0)
+        scored = case(
+            victim_type=victim_type, kind=kind, decision="ALLOW", points=20, reasons=["NEW_PAYEE"]
+        )
+        assert allocate(scored, EU_PSR_PROVISIONAL, DEFAULT).reason.startswith("art. 87(3)")
+
+
+def test_eu_warned_payment_with_real_suspicion_signals_moves_the_loss_to_the_bank():
+    warned = case(
+        kind="INVOICE_IBAN_CHANGE",
+        victim_type="OTHER_BUSINESS",
+        decision="WARN",
+        points=75,
+        reasons=["NEW_PAYEE", "VOP_NO_MATCH", "FRESH_RECEIVER"],
+        warned_and_ignored=True,
+    )
+    a = allocate(warned, EU_PSR_PROVISIONAL, MONITORED)
+    assert a.covered and a.reason.startswith("art. 68(2)")
+    assert parts(a) == (0, 500_000, 0)
+
+
+def test_eu_unusualness_and_payee_name_alone_are_not_justified_suspicion():
+    warned = case(
+        kind="INVOICE_IBAN_CHANGE",
+        victim_type="OTHER_BUSINESS",
+        decision="WARN",
+        points=60,
+        reasons=["NEW_PAYEE", "VOP_NO_MATCH"],
+        warned_and_ignored=True,
+    )
+    a = allocate(warned, EU_PSR_PROVISIONAL, MONITORED)
     assert not a.covered
     assert a.victim_cents == a.loss_cents
+
+
+def test_eu_impersonation_refund_and_its_conditions():
+    scam = case(decision="ALLOW", points=20, reasons=["NEW_PAYEE"])
+    a = allocate(scam, EU_PSR_PROVISIONAL, MONITORED)
+    assert a.covered and a.reason.startswith("art. 60")
+    assert parts(a) == (0, 500_000, 0)
+    for changed in (
+        Assumptions(receiving_banks_monitor_incoming=True, impersonation_via_bank_channels=False),
+        Assumptions(receiving_banks_monitor_incoming=True, victims_report_to_police_and_psp=False),
+    ):
+        assert not allocate(scam, EU_PSR_PROVISIONAL, changed).covered
+    business = case(
+        decision="ALLOW", points=20, reasons=["NEW_PAYEE"], victim_type="MICROENTERPRISE"
+    )
+    assert not allocate(business, EU_PSR_PROVISIONAL, MONITORED).covered
+
+
+def test_eu_gross_negligence_only_removes_the_impersonation_refund():
+    ignored = case(
+        decision="WARN", points=45, reasons=["NEW_PAYEE", "AMOUNT_SPIKE"], warned_and_ignored=True
+    )
+    strict = Assumptions(
+        receiving_banks_monitor_incoming=True, ignored_warning_is_gross_negligence=True
+    )
+    assert not allocate(ignored, EU_PSR_PROVISIONAL, strict).covered
+    # Under art. 68(2) and 87(3) only the payer's own fraud removes the protection.
+    suspicious = replace(ignored, reasons=["NEW_PAYEE", "PASS_THROUGH"])
+    assert allocate(suspicious, EU_PSR_PROVISIONAL, strict).covered
+    assert allocate(
+        ignored, EU_PSR_PROVISIONAL, Assumptions(ignored_warning_is_gross_negligence=True)
+    ).covered
 
 
 def test_no_refund_leaves_the_loss_with_the_victim():
@@ -149,14 +208,13 @@ def test_each_regime_uses_its_own_recovery_reach():
     assert allocate(deep, BR_MED, DEFAULT).loss_cents == 200_000  # along the traced path
 
 
-def test_sensitivity_switches_remove_the_refund():
+def test_sensitivity_switches_remove_the_uk_refund():
     warned = case(warned_and_ignored=True)
-    for regime in (UK_PSR, EU_PSR_PROVISIONAL):
-        assert allocate(warned, regime, DEFAULT).covered
-        strict = allocate(warned, regime, Assumptions(ignored_warning_is_gross_negligence=True))
-        assert not strict.covered
-        unreported = allocate(case(), regime, Assumptions(victims_report_to_police_and_psp=False))
-        assert not unreported.covered
+    assert allocate(warned, UK_PSR, DEFAULT).covered
+    assert not allocate(
+        warned, UK_PSR, Assumptions(ignored_warning_is_gross_negligence=True)
+    ).covered
+    assert not allocate(case(), UK_PSR, Assumptions(victims_report_to_police_and_psp=False)).covered
 
 
 def test_every_allocation_shares_exactly_the_unrecovered_loss():

@@ -20,9 +20,9 @@ evidence about real fraud, real detection rates or real recovery rates.
 | Normal payments warned | 0 (0.0%) | 57 (7.2%) | 57 (7.2%) |
 | Normal payments blocked | 0 | 0 | 0 |
 | Normal payments refused by the bank | 53 | 29 | 29 |
-| Assessment time p50 | n/a | 0.88 ms | 0.88 ms |
-| Assessment time p95 | n/a | 1.13 ms | 1.15 ms |
-| Assessment time p99 | n/a | 1.29 ms | 1.34 ms |
+| Assessment time p50 | n/a | 0.87 ms | 0.87 ms |
+| Assessment time p95 | n/a | 1.14 ms | 1.14 ms |
+| Assessment time p99 | n/a | 1.30 ms | 1.29 ms |
 | Ledger invariants hold | yes | yes | yes |
 
 Recovered money is what holds stopped along the traced path after the victim's report,
@@ -48,8 +48,8 @@ Minimum / median / maximum over the seeds, for each policy.
 | Normal payments warned or blocked | 0.0% / 0.0% / 0.0% | 2.9% / 5.1% / 7.2% | 2.9% / 5.1% / 7.2% |
 | Victims bear under UK_PSR, share of attempted | 2.4% / 18.2% / 27.0% | 0.4% / 5.4% / 13.0% | 0.0% / 0.9% / 3.7% |
 | Banks bear under UK_PSR, share of attempted | 39.3% / 55.9% / 84.2% | 13.6% / 17.1% / 28.2% | 0.0% / 6.2% / 13.1% |
-| Victims bear under EU_PSR_PROVISIONAL, share of attempted | 24.0% / 31.3% / 37.2% | 1.2% / 7.5% / 17.5% | 0.0% / 2.4% / 8.3% |
-| Banks bear under EU_PSR_PROVISIONAL, share of attempted | 27.9% / 45.0% / 53.8% | 11.2% / 13.8% / 25.1% | 0.0% / 5.2% / 9.4% |
+| Victims bear under EU_PSR_PROVISIONAL, share of attempted | 0.0% / 0.0% / 0.0% | 0.0% / 0.0% / 0.0% | 0.0% / 0.0% / 0.0% |
+| Banks bear under EU_PSR_PROVISIONAL, share of attempted | 56.6% / 74.1% / 86.6% | 14.1% / 21.8% / 37.2% | 0.0% / 7.9% / 13.5% |
 | Victims bear under NO_REFUND, share of attempted | 56.6% / 74.1% / 86.6% | 14.1% / 21.8% / 37.2% | 0.0% / 7.9% / 13.5% |
 | Victims bear under BR_MED, share of attempted | 42.7% / 59.8% / 78.4% | 14.1% / 21.8% / 37.2% | 0.0% / 7.7% / 13.5% |
 
@@ -156,8 +156,11 @@ system-wide tracing; this understates what cooperating banks may recover.
 
 - `UK_PSR` is applied as a what-if: the real scheme covers sterling Faster Payments and
   CHAPS. Cap and excess are converted at the ECB rate of 2026-11-24 (£0.83700 per €1).
-- `EU_PSR_PROVISIONAL` follows a provisional agreement that is not in force. The final
-  text may differ.
+- `EU_PSR_PROVISIONAL` follows the Council's position at first reading (21 October 2026),
+  which is not in force. Under its art. 87(3) the payer's bank refunds when it cannot show
+  that both banks monitored the payment. No simulated policy has the receiving bank screen
+  incoming payments, so that rule decides almost every case; the sensitivity table below
+  applies the EU rules as if receiving banks did.
 - `BR_MED` is applied as a what-if to euro payments. It returns blocked money and makes
   no bank pay for the loss.
 - Invoice scams hit businesses. Whether a business counts as a microenterprise is an
@@ -166,29 +169,36 @@ system-wide tracing; this understates what cooperating banks may recover.
 | Policy | Regime | Recovery | Paid scams | Covered | Loss | Victims | Sending banks | Receiving banks |
 |---|---|---|---|---|---|---|---|---|
 | NONE | UK_PSR | first receiving account only | 24 | 18 | €71,655.33 | €21,830.42 | €24,912.43 | €24,912.48 |
-| NONE | EU_PSR_PROVISIONAL | first receiving account only | 24 | 12 | €71,655.33 | €32,071.10 | €39,584.23 | €0.00 |
+| NONE | EU_PSR_PROVISIONAL | first receiving account only | 24 | 24 | €71,655.33 | €0.00 | €71,655.33 | €0.00 |
 | NONE | NO_REFUND | first receiving account only | 24 | 0 | €71,655.33 | €71,655.33 | €0.00 | €0.00 |
 | NONE | BR_MED | along the traced path | 24 | 0 | €50,932.69 | €50,932.69 | €0.00 | €0.00 |
 | SENDER_ONLY | UK_PSR | first receiving account only | 10 | 7 | €25,647.35 | €11,182.20 | €7,232.55 | €7,232.60 |
-| SENDER_ONLY | EU_PSR_PROVISIONAL | first receiving account only | 10 | 4 | €25,647.35 | €15,086.89 | €10,560.46 | €0.00 |
+| SENDER_ONLY | EU_PSR_PROVISIONAL | first receiving account only | 10 | 10 | €25,647.35 | €0.00 | €25,647.35 | €0.00 |
 | SENDER_ONLY | NO_REFUND | first receiving account only | 10 | 0 | €25,647.35 | €25,647.35 | €0.00 | €0.00 |
 | SENDER_ONLY | BR_MED | along the traced path | 10 | 0 | €25,647.35 | €25,647.35 | €0.00 | €0.00 |
 | SENDER_AND_RECEIVER | UK_PSR | first receiving account only | 10 | 7 | €7,407.18 | €3,163.00 | €2,122.08 | €2,122.10 |
-| SENDER_AND_RECEIVER | EU_PSR_PROVISIONAL | first receiving account only | 10 | 4 | €7,407.18 | €2,924.06 | €4,483.12 | €0.00 |
+| SENDER_AND_RECEIVER | EU_PSR_PROVISIONAL | first receiving account only | 10 | 10 | €7,407.18 | €0.00 | €7,407.18 | €0.00 |
 | SENDER_AND_RECEIVER | NO_REFUND | first receiving account only | 10 | 0 | €7,407.18 | €7,407.18 | €0.00 | €0.00 |
 | SENDER_AND_RECEIVER | BR_MED | along the traced path | 10 | 0 | €7,407.18 | €7,407.18 | €0.00 | €0.00 |
 
-Sensitivity: if ignoring a bank warning were treated as gross negligence (the UK rules
-set a high bar for gross negligence, so this is a test, not a reading of the rules):
+Sensitivity checks. Each row changes one or two assumptions; they are tests of the
+rules, not readings of them.
 
-| Policy | Regime | Covered | Victims | Banks |
-|---|---|---|---|---|
-| SENDER_ONLY | UK_PSR | 1 | €23,751.62 | €1,895.73 |
-| SENDER_ONLY | EU_PSR_PROVISIONAL | 1 | €23,632.15 | €2,015.20 |
-| SENDER_AND_RECEIVER | UK_PSR | 1 | €7,407.18 | €0.00 |
-| SENDER_AND_RECEIVER | EU_PSR_PROVISIONAL | 1 | €7,407.18 | €0.00 |
+| Variant | Policy | Regime | Covered | Victims | Banks |
+|---|---|---|---|---|---|
+| Ignoring a warning treated as gross negligence (a test; the UK rules set a high bar) | SENDER_ONLY | UK_PSR | 1 | €23,751.62 | €1,895.73 |
+| Ignoring a warning treated as gross negligence (a test; the UK rules set a high bar) | SENDER_AND_RECEIVER | UK_PSR | 1 | €7,407.18 | €0.00 |
+| Receiving banks also screen incoming payments | NONE | EU_PSR_PROVISIONAL | 24 | €0.00 | €71,655.33 |
+| Receiving banks also screen incoming payments | SENDER_ONLY | EU_PSR_PROVISIONAL | 4 | €15,086.89 | €10,560.46 |
+| Receiving banks also screen incoming payments | SENDER_AND_RECEIVER | EU_PSR_PROVISIONAL | 4 | €2,924.06 | €4,483.12 |
+| Receiving banks screen incoming payments, fraudsters did not use the bank's channels | NONE | EU_PSR_PROVISIONAL | 24 | €0.00 | €71,655.33 |
+| Receiving banks screen incoming payments, fraudsters did not use the bank's channels | SENDER_ONLY | EU_PSR_PROVISIONAL | 1 | €23,871.69 | €1,775.66 |
+| Receiving banks screen incoming payments, fraudsters did not use the bank's channels | SENDER_AND_RECEIVER | EU_PSR_PROVISIONAL | 1 | €5,631.52 | €1,775.66 |
 
-Settings used: `sending_psp_applies_excess=True`, `victims_report_to_police_and_psp=True`, `ignored_warning_is_gross_negligence=False`.
+Under `NONE` the sending bank does not monitor either, so EU art. 87(3) still applies in
+the receiving-bank variants.
+
+Settings used: `sending_psp_applies_excess=True`, `victims_report_to_police_and_psp=True`, `impersonation_via_bank_channels=True`, `receiving_banks_monitor_incoming=False`, `ignored_warning_is_gross_negligence=False`.
 
 ## Assumptions (ScenarioConfig)
 
