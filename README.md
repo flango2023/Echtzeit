@@ -56,6 +56,116 @@ These numbers are not evidence about real fraud. The same author wrote the scena
 risk rules, so the results are circular by construction. Every probability, delay and amount
 is an assumption, and the results file lists all of them.
 
+## Architecture
+
+Modules in `src/echtzeit/` and how they depend on each other. An arrow points from a module to
+one it uses. `errors.py` is left out, because almost every module imports it.
+
+```mermaid
+flowchart TD
+  bank(("Bank client"))
+  operator(("Operator"))
+
+  subgraph api["Bank API"]
+    app["HTTP endpoints<br/>api/app.py"]
+    auth["API keys and roles<br/>api/auth.py"]
+    limits["Rate limits<br/>api/ratelimit.py"]
+    serve["Safe launcher<br/>api/serve.py"]
+  end
+
+  subgraph processing["Payment processing"]
+    payments["Payment processor<br/>payments.py"]
+    pacs008["Credit transfer XML<br/>iso20022/pacs008.py"]
+    pacs002["Status report XML<br/>iso20022/pacs002.py"]
+    xml["XML helpers<br/>iso20022/_xml.py"]
+    ids["IBAN, BIC, UETR<br/>iso20022/identifiers.py"]
+    vop["Verification of Payee<br/>vop.py"]
+    risk["Risk scoring<br/>risk.py"]
+  end
+
+  subgraph storage["Ledger and recovery"]
+    ledger["Double-entry ledger<br/>ledger.py"]
+    holds["Holds<br/>holds.py"]
+    tracing["Tracing and freezes<br/>tracing.py"]
+    audit["Rejection and request logs<br/>audit.py"]
+    retention["Retention CLI<br/>retention.py"]
+    models["Tables and triggers<br/>models.py"]
+    db["Engine, optional SQLCipher<br/>db.py"]
+    dbkey["Database key files<br/>dbkey.py"]
+  end
+
+  subgraph analysis["Scenario analysis"]
+    simulation["Seeded scenarios<br/>simulation.py"]
+    liability["Liability regimes<br/>liability.py"]
+    calibration["Calibration<br/>calibration.py"]
+    report["Results report<br/>scenario_report.py"]
+  end
+
+  bank -->|calls| app
+  operator -->|starts| serve
+  operator -->|runs purges| retention
+  serve -->|starts| app
+  serve -->|checks key file| dbkey
+  app --> auth
+  app --> limits
+  app -->|loads key| dbkey
+  app --> vop
+  app --> risk
+  app -->|payments| payments
+  app -->|accounts, holds| ledger
+  app -->|traces, freezes| tracing
+  app -->|reads logs| audit
+
+  payments -->|parses| pacs008
+  payments -->|replies| pacs002
+  payments -->|books| ledger
+  payments -->|logs rejections| audit
+  pacs002 -->|answers| pacs008
+  pacs008 --> xml
+  pacs002 --> xml
+  pacs008 --> ids
+  pacs002 --> ids
+  vop -->|looks up holder| ledger
+  risk -->|payee result| vop
+  risk -->|payment history| ledger
+
+  ledger -->|checks holds| holds
+  tracing -->|follows transfers| ledger
+  tracing -->|freezes| holds
+  ledger --> models
+  holds --> models
+  audit --> models
+  retention -->|purges logs| models
+  retention -->|opens database| db
+  models --> db
+  db -->|encryption key| dbkey
+
+  simulation --> payments
+  simulation --> risk
+  simulation --> tracing
+  simulation -->|accounts| ledger
+  liability -->|case outcomes| simulation
+  calibration --> simulation
+  calibration --> liability
+  report --> simulation
+  report --> liability
+  report --> calibration
+
+  classDef apiTone fill:#dbeafe,stroke:#2563eb,color:#172554
+  classDef procTone fill:#fef3c7,stroke:#d97706,color:#78350f
+  classDef storeTone fill:#dcfce7,stroke:#16a34a,color:#14532d
+  classDef simTone fill:#ffe4e6,stroke:#e11d48,color:#881337
+  class bank,operator,app,auth,limits,serve apiTone
+  class payments,pacs008,pacs002,xml,ids,vop,risk procTone
+  class ledger,holds,tracing,audit,retention,models,db,dbkey storeTone
+  class simulation,liability,calibration,report simTone
+```
+
+The first version of this diagram was generated with [GitDiagram](https://gitdiagram.com) and
+then checked against the imports in the code. The check added `dbkey.py`, the operator, the
+retention CLI's own database connection, and the `vop.py` → `ledger.py` and `pacs002.py` →
+`pacs008.py` dependencies.
+
 ## What is implemented
 
 | Module | What it does | Design and limits |
